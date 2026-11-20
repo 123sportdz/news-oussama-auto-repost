@@ -9,10 +9,26 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
 FACEBOOK_CLI = "/opt/hatch/bin/facebook-cli"
+
+
+def _ytdlp() -> str:
+    """yt-dlp binary: PATH first, then ~/.local/bin.
+
+    A system-wide pip install does NOT survive a VM rebuild — yt-dlp
+    vanished that way on 2026-11-20 and every download failed until it
+    was reinstalled with `pip install --user`. ~/.local survives, so
+    check it as a fallback whatever PATH the cron runs with.
+    """
+    found = shutil.which("yt-dlp")
+    if found:
+        return found
+    local = Path.home() / ".local" / "bin" / "yt-dlp"
+    return str(local) if local.exists() else "yt-dlp"
 
 
 def post_id_from_url(url: str) -> str | None:
@@ -81,8 +97,9 @@ def _clean_title(title: str) -> str:
     return title.rsplit(" | ", 1)[0] if " | " in title else title
 
 
-def video_info(url: str, ytdlp: str = "yt-dlp") -> dict:
+def video_info(url: str, ytdlp: str | None = None) -> dict:
     """Post metadata from yt-dlp --dump-json (public posts, no login)."""
+    ytdlp = ytdlp or _ytdlp()
     cmd = [ytdlp, "--dump-json", "--no-download", url]
     print("+", " ".join(cmd))
     try:
@@ -118,7 +135,7 @@ def video_info(url: str, ytdlp: str = "yt-dlp") -> dict:
 def download_video(url: str, out_path: Path | str) -> Path:
     """Download a reel/video with yt-dlp. Returns the output path."""
     out_path = Path(out_path)
-    cmd = ["yt-dlp", "--no-playlist", "-o", str(out_path), url]
+    cmd = [_ytdlp(), "--no-playlist", "-o", str(out_path), url]
     print("+", " ".join(cmd))
     try:
         result = subprocess.run(cmd, text=True, capture_output=True,
