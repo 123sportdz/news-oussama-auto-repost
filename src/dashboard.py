@@ -399,6 +399,7 @@ class Handler(BaseHTTPRequestHandler):
             if url and url not in existing:
                 existing.append(url)
             QUEUE.write_text("\n".join(existing) + ("\n" if existing else ""))
+            return self._redirect_home()  # config unchanged — do not rewrite it
         elif path == "/queue-process":
             url = get("url").strip()
             if url:
@@ -412,6 +413,7 @@ class Handler(BaseHTTPRequestHandler):
                 _run_in_background(_process_url_job, url)
             else:
                 set_status("أضف رابط منشور أولا", False)
+            return self._redirect_home()  # config unchanged — do not rewrite it
         elif path == "/process":
             set_status("⏳ جارٍ سحب ومعالجة الطابور …")
             _run_in_background(_process_queue_job)
@@ -746,9 +748,19 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="src.dashboard")
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--no-browser", action="store_true",
+                    help="do not open the browser automatically")
     a = ap.parse_args(argv)
     server = ThreadingHTTPServer((a.host, a.port), Handler)
-    print(f"Dashboard: http://{a.host}:{a.port}  (Ctrl+C to stop)")
+    url = f"http://{a.host}:{a.port}"
+    if not a.no_browser:
+        def _open() -> None:
+            import time
+            import webbrowser
+            time.sleep(1.5)  # let the server bind first
+            webbrowser.open(url)
+        threading.Thread(target=_open, daemon=True).start()
+    print(f"Dashboard: {url}  (Ctrl+C to stop)")
     server.serve_forever()
 
 

@@ -19,7 +19,7 @@ echo.
 pip install -q -r requirements.txt
 echo.
 if "%1"=="--auto" (python -m src.scheduler & goto :eof)
-if "%1"=="--dashboard" (echo Dashboard: http://127.0.0.1:8080  (Ctrl+C to stop) & start http://127.0.0.1:8080 & python -m src.dashboard & goto :eof)
+if "%1"=="--dashboard" (echo Dashboard: http://127.0.0.1:8080  (Ctrl+C to stop) & python -m src.dashboard & goto :eof)
 python -m src.monitor %*
 echo.
 echo [i] To open the web dashboard, run: .\setup.bat --dashboard   (or .\dashboard.bat)
