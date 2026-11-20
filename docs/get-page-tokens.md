@@ -1,10 +1,19 @@
-# Getting long-lived Page tokens with your own app (dzبلادي)
+# Getting long-lived Page tokens with your own app (NEWS OUSSAMA)
 
 Use this instead of — or alongside — the Hatch/Muse Facebook connect
 flow (`agent.meta.ai`), which is currently blocked by a browser
-extension in your Chrome. Your own app **dzبلادي** (App ID
-`931118869751993`, owned by the `elhiwar_dz` portfolio, you have full
-access) can issue the tokens the Graph API route needs.
+extension in your Chrome. Your own **Business-type** app **NEWS
+OUSSAMA** (creation prepared 2026-11-20 in the `elhiwar_dz` portfolio,
+with the "Manage everything on your Page" use case — click Create app
+to finish it) can issue the tokens the Graph API route needs.
+
+> The old route via the **dzبلادي** app (App ID `931118869751993`) is
+> DEAD — dzبلادي is a Consumer-type app and Meta offers it no
+> `pages_manage_posts` permission from any side (Use Cases, Graph API
+> Explorer, App Review). Do not go back to it. Fill in the NEWS
+> OUSSAMA App ID below once the app is created.
+
+- NEWS OUSSAMA App ID: `<fill in after creation — Settings → Basic → App ID>`
 
 > Never paste a token or the App Secret in chat, in a browser page,
 > or in any file that gets committed. Tokens go only in the local
@@ -26,7 +35,7 @@ already picks the right token per destination; the old single
 ## Steps (in your browser, logged in as Oussama Tonis)
 
 1. **Graph API Explorer** — https://developers.facebook.com/tools/explorer
-   — pick the **dzبلادي** app in the Application dropdown.
+   — pick the **NEWS OUSSAMA** app in the Application dropdown.
 2. **Get User Access Token** — tick exactly these permissions:
    `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`.
    Generate the token (short-lived, ~1 hour).
@@ -35,11 +44,11 @@ already picks the right token per destination; the old single
    ```
    curl -G "https://graph.facebook.com/v21.0/oauth/access_token" \
      -d "grant_type=fb_exchange_token" \
-     -d "client_id=931118869751993" \
+     -d "client_id=<NEWS_OUSSAMA_APP_ID>" \
      -d "client_secret=<YOUR_APP_SECRET>" \
      -d "fb_exchange_token=<SHORT_LIVED_USER_TOKEN>"
    ```
-   The App Secret is in the app dashboard: Developers → dzبلادي →
+   The App Secret is in the app dashboard: Developers → NEWS OUSSAMA →
    Settings → Basic → App Secret (click Show, you may be asked for
    your Facebook password).
 4. **Fetch the Page tokens** — with the long-lived user token:
@@ -68,12 +77,11 @@ now, repeat steps 2–4 — do not debug the code first.
 
 ## Open unknowns (check while you are in the app dashboard)
 
-- Whether `pages_manage_posts` for **dzبلادي** already has Standard
-  Access, or Facebook asks for App Review / Advanced Access. You are
-  the app admin and the Page admin for both Pages, so Standard Access
-  should be enough for your own Pages — if it asks for review, that
-  is the next blocker and it cannot be worked around from code.
-- NewsDz9 is a standalone Page (in no portfolio) while dzبلادي lives
-  in `elhiwar_dz`. `/me/accounts` lists every Page you admin, so it
+- A Business app created with the "Manage everything on your Page"
+  use case should offer `pages_manage_posts` in the Explorer — if it
+  does not appear, that is the next blocker, and the fix is in the
+  app's Use Cases, not in code.
+- NewsDz9 is a standalone Page (in no portfolio) while NEWS OUSSAMA
+  lives in `elhiwar_dz`. `/me/accounts` lists every Page you admin, so it
   should still return NewsDz9 — if it does not, that is the answer,
-  and the fix is to grant dzبلادي access from NewsDz9's settings.
+  and the fix is to grant the app access from NewsDz9's settings.
