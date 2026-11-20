@@ -33,3 +33,4 @@ config.yaml.bak
 # Keep the empty state dirs in git
 !state/.gitkeep
 !state/downloads/.gitkeep
+state/monitor.lock
