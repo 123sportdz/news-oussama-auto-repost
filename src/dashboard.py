@@ -35,11 +35,14 @@ sys.path.insert(0, str(BASE))
 from src.caption import build_caption  # noqa: E402
 from src.config import env, load_config, save_config  # noqa: E402
 from src import state as state_mod  # noqa: E402
-from src.monitor import (DL, QUEUE, READY, process_queue, process_url,  # noqa: E402
+from src.monitor import (DL, QUEUE, READY, _parse_window, in_publish_window,  # noqa: E402
+                         next_window_start, process_queue, process_url,
                          publish_commands, refresh_ready)
 from src.publisher import ConsentMissingError, PublishError, publish  # noqa: E402
+from src.stats import STATS, refresh_stats  # noqa: E402
 
 STATUS = BASE / "state" / "last_action.json"
+_JOBS = {"running": 0}
 
 CSS = """
 body{font-family:system-ui,sans-serif;max-width:900px;margin:0 auto;
@@ -89,6 +92,10 @@ def get_status() -> dict:
 def _publish_one(cfg: dict, pid: str, dest_name: str,
                  token: str = "") -> tuple[bool, str]:
     """Publish one ready post to one destination. Returns (ok, message)."""
+    windows = cfg.get("settings", {}).get("publish", {}).get("windows") or []
+    if not in_publish_window(windows):
+        return False, (f"⏸ خارج أوقات النشر — النافذة القادمة "
+                       f"{next_window_start(windows)}")
     ready = state_mod.load_json(READY, {})
     rec = ready.get(str(pid))
     if not rec:
@@ -166,8 +173,26 @@ def _process_url_job(url: str) -> None:
         set_status(f"❌ خطأ أثناء سحب {url}: {exc}", False)
 
 
+def _refresh_stats_job() -> None:
+    try:
+        cfg = load_config()
+        stats = refresh_stats(cfg)
+        count = sum(len(v.get("destinations", {}))
+                    for v in stats.values())
+        set_status(f"📊 تم تحديث الإحصائيات لـ {count} منشور منشور")
+    except Exception as exc:  # noqa: BLE001 — surfaced in the banner
+        set_status(f"❌ خطأ أثناء تحديث الإحصائيات: {exc}", False)
+
+
 def _run_in_background(target, *args) -> None:
-    threading.Thread(target=target, args=args, daemon=True).start()
+    def wrapper() -> None:
+        _JOBS["running"] += 1
+        try:
+            target(*args)
+        finally:
+            _JOBS["running"] -= 1
+
+    threading.Thread(target=wrapper, daemon=True).start()
 
 
 # ------------------------------------------------------------ file serving ---
@@ -223,6 +248,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(yaml.safe_dump(cfg, allow_unicode=True,
                                              sort_keys=False),
                               "text/yaml; charset=utf-8")
+        if self.path == "/status.json":
+            queue = ([l for l in QUEUE.read_text().splitlines() if l.strip()]
+                     if QUEUE.exists() else [])
+            ready = state_mod.load_json(READY, {})
+            published = state_mod.load_json(state_mod.PUBLISHED, {})
+            return self._send(json.dumps({
+                "queue": len(queue), "ready": len(ready),
+                "published": len(published),
+                "busy": _JOBS["running"] > 0,
+                "last_action": get_status(),
+            }), "application/json; charset=utf-8")
         if self.path.startswith("/file/"):
             found = _resolve_download(self.path[len("/file/"):].split("?")[0])
             if found is None:
@@ -301,6 +337,53 @@ class Handler(BaseHTTPRequestHandler):
             state_mod.save_json(state_mod.SEEN, seen)
             set_status(f"🗑 حُذف المنشور {pid} من الجاهز (يمكن إعادة سحبه)")
             return self._redirect_home()
+        elif path == "/set-caption":
+            pid = get("pid")
+            caption = get("caption").strip()
+            ready = state_mod.load_json(READY, {})
+            rec = ready.get(pid)
+            if rec and caption:
+                rec["caption"] = caption
+                rec["publish"] = publish_commands(cfg, rec)
+                state_mod.save_json(READY, ready)
+                set_status(f"✏️ تم تعديل نص المنشور {pid}")
+            else:
+                set_status("النص فارغ أو المنشور غير موجود", False)
+            return self._redirect_home()
+        elif path == "/refresh-stats":
+            set_status("⏳ جارٍ تحديث الإحصائيات …")
+            _run_in_background(_refresh_stats_job)
+            return self._redirect_home()
+        elif path == "/settings":
+            settings = cfg.setdefault("settings", {})
+            try:
+                minutes = int(get("check_every_minutes") or 0)
+                if minutes > 0:
+                    settings["check_every_minutes"] = minutes
+                per_check = int(get("max_posts_per_check") or 0)
+                if per_check > 0:
+                    settings["max_posts_per_check"] = per_check
+                size = int(get("wm_size") or 0)
+                if size > 0:
+                    settings.setdefault("watermark", {})["size_px"] = size
+            except ValueError:
+                pass
+            position = get("wm_position")
+            if position in ("bottom-right", "bottom-left", "top-right",
+                            "top-left", "center"):
+                settings.setdefault("watermark", {})["position"] = position
+            template = get("caption_template").strip()
+            if template:
+                settings.setdefault("caption", {})["template"] = template
+            tags = [t.strip() for t in get("hashtags").split(",") if t.strip()]
+            settings.setdefault("caption", {})["hashtags"] = tags
+            mode = get("mode")
+            if mode in ("draft", "auto"):
+                settings.setdefault("publish", {})["mode"] = mode
+            windows = [w.strip() for w in get("windows").split(",")
+                       if w.strip() and _parse_window(w.strip())]
+            settings.setdefault("publish", {})["windows"] = windows
+            set_status("⚙️ تم حفظ الإعدادات")
         else:
             return self._send("<h1>404</h1>", status=404)
         save_config(cfg)
@@ -325,8 +408,10 @@ def home_page() -> str:
     status_html = ""
     if status.get("message"):
         cls = "status ok" if status.get("ok") else "status bad"
-        status_html = (f'<div class="{cls}">{esc(status["message"])}'
-                       f'</div>')
+        status_html = (f'<div id="status-banner" class="{cls}">'
+                       f'{esc(status["message"])}</div>')
+    else:
+        status_html = '<div id="status-banner" class="status">جاهز</div>'
 
     src_rows = []
     for i, s in enumerate(cfg.get("sources", [])):
@@ -394,10 +479,54 @@ def home_page() -> str:
                     f'<form method="post" action="/delete-ready">'
                     f'<input type="hidden" name="pid" value="{esc(pid)}">'
                     f'<button>🗑 حذف</button></form>')
+        caption_form = (
+            f'<form method="post" action="/set-caption">'
+            f'<input type="hidden" name="pid" value="{esc(pid)}">'
+            f'<input name="caption" value="{esc(rec.get("caption"))}" '
+            f'size="40"><button>✏️ حفظ النص</button></form>')
         ready_rows.append([
-            esc(rec.get("owner")), esc(rec.get("caption"))[:80],
+            esc(rec.get("owner")),
+            esc(rec.get("caption"))[:80] + "<br>" + caption_form,
             media, actions,
         ])
+
+    stats = state_mod.load_json(STATS, {})
+    stats_rows = []
+    for pid, entry in stats.items():
+        for dest, info in (entry.get("destinations") or {}).items():
+            eng = info.get("engagement") or {}
+            eng_text = " • ".join(f"{k}: {v}" for k, v in eng.items()) or "—"
+            stats_rows.append([
+                esc(pid), esc(dest),
+                (f'<a href="{esc(info.get("url") or "#")}">الرابط</a>'
+                 if info.get("url") else "—"),
+                esc(eng_text), esc(info.get("refreshed_at") or ""),
+            ])
+
+    wm = settings.get("watermark", {})
+    cap = settings.get("caption", {})
+    pub = settings.get("publish", {})
+    settings_form = f"""
+<form method="post" action="/settings">
+فحص كل <input name="check_every_minutes" value="{esc(settings.get('check_every_minutes'))}" size="4"> دقيقة |
+حد أقصى <input name="max_posts_per_check" value="{esc(settings.get('max_posts_per_check'))}" size="3"> منشور |
+حجم الشعار <input name="wm_size" value="{esc(wm.get('size_px'))}" size="4">px |
+موضع الشعار <select name="wm_position">
+<option value="bottom-right"{" selected" if wm.get('position') == 'bottom-right' else ''}>أسفل يمين</option>
+<option value="bottom-left"{" selected" if wm.get('position') == 'bottom-left' else ''}>أسفل يسار</option>
+<option value="top-right"{" selected" if wm.get('position') == 'top-right' else ''}>أعلى يمين</option>
+<option value="top-left"{" selected" if wm.get('position') == 'top-left' else ''}>أعلى يسار</option>
+<option value="center"{" selected" if wm.get('position') == 'center' else ''}>الوسط</option>
+</select><br>
+قالب النص <input name="caption_template" value="{esc(cap.get('template'))}" size="30"> |
+هاشتاغات <input name="hashtags" value="{esc(', '.join(cap.get('hashtags') or []))}" size="20" placeholder="#كرة, #أخبار"><br>
+الوضع <select name="mode">
+<option value="auto"{" selected" if pub.get('mode') == 'auto' else ''}>تلقائي (نشر مباشر)</option>
+<option value="draft"{" selected" if pub.get('mode') == 'draft' else ''}>مسودة (مراجعة أولا)</option>
+</select> |
+أوقات النشر <input name="windows" value="{esc(', '.join(pub.get('windows') or []))}" size="20" placeholder="18:00-23:00">
+<button>⚙️ حفظ الإعدادات</button>
+</form>"""
 
     return f"""<!DOCTYPE html><html lang="ar"><head><meta charset="utf-8">
 <title>NEWS OUSSAMA — لوحة التحكم</title><style>{CSS}</style></head><body>
@@ -425,9 +554,33 @@ def home_page() -> str:
 <h2>جاهز للنشر ({len(ready)})</h2>
 {table(ready_rows, ["المصدر", "النص", "المعاينة + تحميل", "النشر"])}
 
+<h2>⚙️ الإعدادات</h2>
+{settings_form}
+
+<h2>📊 إحصائيات المنشورات</h2>
+<form method="post" action="/refresh-stats"><button>🔄 تحديث الإحصائيات</button></form>
+{table(stats_rows, ["المنشور", "الوجهة", "الرابط", "التفاعل", "آخر تحديث"]) if stats_rows else "<p>لا توجد إحصائيات بعد — انشر منشورا ثم اضغط تحديث الإحصائيات.</p>"}
+
 <h2>السجل</h2>
 <p>منشورات معالجة (seen): {len(seen)} | منشورات منشورة: {len(published)}</p>
 <p><a href="/config.yaml">⬇ تحميل config.yaml</a></p>
+<script>
+let wasBusy = false;
+async function poll() {{
+  try {{
+    const r = await fetch('/status.json');
+    const s = await r.json();
+    const banner = document.getElementById('status-banner');
+    if (s.last_action && s.last_action.message && banner) {{
+      banner.textContent = s.last_action.message;
+      banner.className = 'status ' + (s.last_action.ok ? 'ok' : 'bad');
+    }}
+    if (wasBusy && !s.busy) location.reload();
+    wasBusy = s.busy;
+  }} catch (e) {{}}
+}}
+setInterval(poll, 5000);
+</script>
 </body></html>"""
 
 

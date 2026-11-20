@@ -22,6 +22,10 @@ class DashboardButtonsTest(unittest.TestCase):
         self.assertIn("/process", page)
         self.assertIn("/publish", page)
         self.assertIn("/queue-process", page)
+        self.assertIn("/settings", page)
+        self.assertIn("/set-caption", page)
+        self.assertIn("/refresh-stats", page)
+        self.assertIn("status.json", page)
 
     def test_resolve_download_rejects_traversal(self):
         self.assertIsNone(dashboard._resolve_download("../config"))
@@ -96,6 +100,14 @@ class DashboardServerTest(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             urllib.request.urlopen(self._url("/file/..%2Fconfig"))
         self.assertEqual(ctx.exception.code, 404)
+
+    def test_status_json(self):
+        with urllib.request.urlopen(self._url("/status.json")) as resp:
+            data = json.loads(resp.read())
+        self.assertIn("queue", data)
+        self.assertIn("ready", data)
+        self.assertIn("busy", data)
+        self.assertIn("last_action", data)
 
     def test_queue_post_adds_url(self):
         queue = BASE / "state" / "queue.txt"

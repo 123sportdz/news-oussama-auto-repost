@@ -19,7 +19,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
+from datetime import datetime
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent.parent
@@ -77,6 +79,80 @@ def publish_commands(cfg: dict, record: dict) -> list[dict]:
     return cmds
 
 
+def file_sha256(path: Path | str) -> str:
+    """SHA-256 of a media file — the content fingerprint for dedup."""
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def find_duplicate_by_hash(seen: dict, content_hash: str,
+                           exclude_pid: str = "") -> str | None:
+    """Post id of an earlier post with the same video/photo bytes, if any.
+
+    Source pages often repost the same clip under a new post id — post_id
+    dedup alone would publish it twice.
+    """
+    for pid, rec in seen.items():
+        if pid != str(exclude_pid) and rec.get("content_hash") == content_hash:
+            return str(pid)
+    return None
+
+
+def _parse_window(window: str) -> tuple[int, int] | None:
+    try:
+        start, end = window.split("-", 1)
+        sh, sm = (int(x) for x in start.split(":"))
+        eh, em = (int(x) for x in end.split(":"))
+        return (sh * 60 + sm, eh * 60 + em)
+    except (ValueError, AttributeError):
+        return None
+
+
+def in_publish_window(windows: list[str] | None,
+                      now: datetime | None = None) -> bool:
+    """True when publishing is allowed now. Empty list = always allowed.
+
+    Windows are local-time "HH:MM-HH:MM" ranges; overnight ranges
+    (e.g. "22:00-01:00") work too.
+    """
+    if not windows:
+        return True
+    now = now or datetime.now()
+    minute = now.hour * 60 + now.minute
+    for window in windows:
+        parsed = _parse_window(window)
+        if parsed is None:
+            continue
+        start, end = parsed
+        if start <= end:
+            if start <= minute < end:
+                return True
+        elif minute >= start or minute < end:
+            return True
+    return False
+
+
+def next_window_start(windows: list[str] | None,
+                      now: datetime | None = None) -> str | None:
+    """Start ("HH:MM") of the next publish window, or None if always open."""
+    if not windows:
+        return None
+    now = now or datetime.now()
+    minute = now.hour * 60 + now.minute
+    starts = sorted(
+        p[0] for w in windows if (p := _parse_window(w)) is not None)
+    if not starts:
+        return None
+    for start in starts:
+        if start > minute:
+            return f"{start // 60:02d}:{start % 60:02d}"
+    first = starts[0]
+    return f"{first // 60:02d}:{first % 60:02d}"
+
+
 def refresh_ready(cfg: dict) -> dict:
     """Recompute publish commands for ready posts from the CURRENT config,
     so a page_id filled in later unblocks them without reprocessing."""
@@ -109,6 +185,15 @@ def process_url(url: str, cfg: dict) -> dict:
     wm = DL / f"{pid}-watermarked.{'jpg' if is_photo else 'mp4'}"
     if not raw.exists():
         download_video(url, raw)
+    content_hash = file_sha256(raw)
+    seen = state_mod.load_json(state_mod.SEEN, {})
+    dup = find_duplicate_by_hash(seen, content_hash, exclude_pid=pid)
+    if dup:
+        print(f"DUPLICATE content of {dup} — skipping re-edit/repost")
+        raw.unlink(missing_ok=True)
+        state_mod.mark_seen(pid, {**info, "content_hash": content_hash,
+                                  "duplicate_of": dup})
+        return seen[dup]
     if not wm.exists():
         if is_photo:
             watermark_photo(raw, wm, size=int(wm_settings.get("size_px", 320)),
@@ -123,7 +208,8 @@ def process_url(url: str, cfg: dict) -> dict:
                 max_duration_seconds=int(editor.get("max_duration_seconds", 0)),
                 loudnorm=bool(editor.get("loudnorm", False)),
             )
-    record = {**info, "raw": str(raw), "watermarked": str(wm)}
+    record = {**info, "raw": str(raw), "watermarked": str(wm),
+              "content_hash": content_hash}
     state_mod.mark_seen(pid, record)
     return record
 
@@ -154,6 +240,11 @@ def publish_ready(cfg: dict, token: str = "") -> None:
     state.mark_published. Consent errors leave the post queued.
     """
     ready = state_mod.load_json(READY, {})
+    windows = cfg.get("settings", {}).get("publish", {}).get("windows") or []
+    if not in_publish_window(windows):
+        print(f"  ⏸ outside publish window; next window starts "
+              f"{next_window_start(windows)}")
+        return
     for pid, rec in ready.items():
         settings = cfg.get("settings", {})
         cap = settings.get("caption", {})
