@@ -6,6 +6,27 @@ from src import state as state_mod
 from src.monitor import QUEUE
 
 
+class RunLockTest(unittest.TestCase):
+    def test_second_run_is_refused_while_first_holds_lock(self):
+        import tempfile
+        from pathlib import Path
+        path = Path(tempfile.mkdtemp()) / "monitor.lock"
+        with mon.RunLock(path) as first:
+            self.assertTrue(first)
+            with mon.RunLock(path) as second:
+                self.assertFalse(second)
+            self.assertTrue(path.exists())
+        self.assertFalse(path.exists())
+
+    def test_stale_lock_is_taken_over(self):
+        import tempfile
+        from pathlib import Path
+        path = Path(tempfile.mkdtemp()) / "monitor.lock"
+        path.write_text("999999")  # a PID that does not exist
+        with mon.RunLock(path) as locked:
+            self.assertTrue(locked)
+
+
 class ProcessQueueTest(unittest.TestCase):
     def test_failure_isolated_and_progress_saved(self):
         ready_before = state_mod.load_json(state_mod.READY, {})

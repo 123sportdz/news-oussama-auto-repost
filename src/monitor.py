@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -215,6 +216,45 @@ def process_url(url: str, cfg: dict) -> dict:
 
 
 FAILED = BASE / "state" / "failed.txt"
+LOCK = BASE / "state" / "monitor.lock"
+
+
+class RunLock:
+    """One processing run at a time (cron vs manual vs dashboard).
+
+    Without this, the 30-min cron and a manual/dashboard run process the
+    same queue at once: two ffmpeg re-encodes on a 1.5-CPU box each run
+    at half speed and both hit the 300s timeout (seen 2026-11-20), and
+    both write the same ready.json. The lock file holds the owner's PID;
+    a lock whose PID is dead is stale and gets taken over.
+    """
+
+    def __init__(self, path: Path = LOCK) -> None:
+        self.path = path
+        self.acquired = False
+
+    def __enter__(self) -> bool:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+            self.acquired = True
+            return True
+        except FileExistsError:
+            try:
+                pid = int(self.path.read_text().strip())
+                os.kill(pid, 0)  # alive?
+                return False
+            except (ValueError, ProcessLookupError, PermissionError,
+                    OSError):
+                self.path.unlink(missing_ok=True)
+                return self.__enter__()
+
+    def __exit__(self, *exc) -> bool:
+        if self.acquired:
+            self.path.unlink(missing_ok=True)
+        return False
 
 
 def process_queue(cfg: dict, urls: list[str], limit: int,
@@ -224,8 +264,20 @@ def process_queue(cfg: dict, urls: list[str], limit: int,
     Progress is saved after EVERY url (ready.json + queue.txt), and one
     failing url is recorded in state/failed.txt instead of stalling or
     losing the whole batch — a hung or broken download used to block
-    everything with no timeout and no saved progress.
+    everything with no timeout and no saved progress. A second run
+    (cron/manual/dashboard) while one holds the lock does nothing and
+    leaves the queue untouched.
     """
+    with RunLock() as locked:
+        if not locked:
+            print("another processing run is already active — skipping")
+            return [], urls
+        return _process_queue_locked(cfg, urls, limit, dry_run)
+
+
+def _process_queue_locked(cfg: dict, urls: list[str], limit: int,
+                          dry_run: bool = False) -> tuple[list[str],
+                                                         list[str]]:
     ready = refresh_ready(cfg)
     done, remaining = [], []
     for i, url in enumerate(urls[:limit]):

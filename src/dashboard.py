@@ -37,9 +37,9 @@ from src.config import env, load_config, save_config  # noqa: E402
 from src import state as state_mod  # noqa: E402
 from src.diagnostics import DIAGNOSTICS, run_and_save  # noqa: E402
 from src.discover import discover_all  # noqa: E402
-from src.monitor import (DL, QUEUE, READY, _parse_window, in_publish_window,  # noqa: E402
-                         next_window_start, process_queue, process_url,
-                         publish_commands, refresh_ready)
+from src.monitor import (DL, QUEUE, READY, RunLock, _parse_window,  # noqa: E402
+                         in_publish_window, next_window_start, process_queue,
+                         process_url, publish_commands, refresh_ready)
 from src.publisher import ConsentMissingError, PublishError, publish  # noqa: E402
 from src.stats import STATS, refresh_stats  # noqa: E402
 
@@ -222,7 +222,11 @@ def _process_queue_job() -> None:
 def _process_url_job(url: str) -> None:
     try:
         cfg = load_config()
-        rec = process_url(url, cfg)
+        with RunLock() as locked:
+            if not locked:
+                set_status("⏳ عملية سحب أخرى شغالة — جرّب بعد قليل", False)
+                return
+            rec = process_url(url, cfg)
         ready = refresh_ready(cfg)
         ready[str(rec["post_id"])] = {**rec,
                                       "publish": publish_commands(cfg, rec)}

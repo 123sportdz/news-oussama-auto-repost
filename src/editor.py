@@ -64,7 +64,9 @@ def build_ffmpeg_command(inp: Path | str, out: Path | str,
            build_filter(size_px, margin, position, crop_to_9x16, loudnorm)]
     if max_duration_seconds and max_duration_seconds > 0:
         cmd += ["-t", str(max_duration_seconds)]
-    cmd += ["-movflags", "+faststart", str(out)]
+    # veryfast: re-encoding a 3-minute reel on a small VPS must not take
+    # 5+ minutes (two concurrent runs once hit the 300s timeout that way)
+    cmd += ["-preset", "veryfast", "-movflags", "+faststart", str(out)]
     return cmd
 
 
