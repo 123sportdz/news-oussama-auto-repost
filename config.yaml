@@ -1,0 +1,51 @@
+settings:
+  check_every_minutes: 30
+  max_posts_per_check: 3
+  watermark:
+    enabled: true
+    position: bottom-right
+    size_px: 194
+    margin_px: 30
+  caption:
+    template: '{caption}'
+    max_chars: 1024
+    hashtags: []
+  editor:
+    crop_to_9x16: false
+    max_duration_seconds: 0
+    loudnorm: false
+    cover_frame_seconds: 3.0
+  publish:
+    mode: draft
+  content_origin: Clips originate from the user's own live broadcasts; source pages
+    repost them.
+sources:
+- url: https://www.facebook.com/goalalgeria16
+  name: Goal Algeria
+  enabled: true
+  types:
+  - reel
+  - video
+  - post
+  - photo
+- url: https://www.facebook.com/mohrec1
+  name: Moh Rec
+  enabled: true
+  types:
+  - reel
+  - video
+  - post
+  - photo
+destinations:
+- url: https://www.facebook.com/NewsDz9
+  name: NewsDz9
+  page_id: '61552757798044'
+  enabled: true
+- url: https://www.facebook.com/aljazaer07/
+  name: aljazaer07
+  page_id: '100083258325099'
+  enabled: true
+- url: https://www.facebook.com/profile.php?id=61583494301111
+  name: Oussama — profile
+  kind: profile
+  enabled: true

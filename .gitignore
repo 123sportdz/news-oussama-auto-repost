@@ -1,0 +1,31 @@
+# Secrets — never commit
+.env
+
+# Processed media + local state (big files, machine-specific)
+state/downloads/*
+!state/downloads/.gitkeep
+state/seen.json
+state/ready.json
+state/published.json
+state/queue.txt
+*.mp4
+*.mov
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local config backup (contains the same page IDs as config.yaml)
+config.yaml.bak
+
+# Keep the empty state dirs in git
+!state/.gitkeep
+!state/downloads/.gitkeep

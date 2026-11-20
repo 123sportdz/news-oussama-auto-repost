@@ -1,0 +1,27 @@
+# NEWS OUSSAMA auto-repost — optional Docker run mode.
+#   docker compose up --build
+# The scheduler loop runs inside the container; the dashboard is
+# available on http://localhost:8080 (profile "dashboard").
+services:
+  app:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./state:/app/state
+      - ./assets:/app/assets:ro
+    restart: unless-stopped
+
+  dashboard:
+    profiles: ["dashboard"]
+    build: .
+    command: ["python3", "-m", "src.dashboard", "--host", "0.0.0.0", "--port", "8080"]
+    env_file:
+      - .env
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - ./state:/app/state
+      - ./assets:/app/assets:ro
+    ports:
+      - "8080:8080"

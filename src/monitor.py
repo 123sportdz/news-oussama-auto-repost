@@ -1,0 +1,231 @@
+"""Monitor: process the URL queue — read, download, edit, draft/publish.
+
+Discovery — honest note:
+  Facebook gives NO public feed/API for pages you do not manage.
+  Tested 2026-11-20 and FAILED: yt-dlp page/reels listing, RSSHub
+  (Cloudflare block), mbasic curl, facebook-cli pages posts list
+  (only managed pages). What DOES work:
+    1. Browser check — open each source page in your own Chrome
+       and take the latest post URLs.
+    2. Paste a post/reel URL — fastest and 100% reliable.
+  So the queue (state/queue.txt, one URL per line) is filled by
+  (1) or (2); this script does everything else automatically.
+
+Usage:
+  python3 -m src.monitor              # process queue.txt (up to max per check)
+  python3 -m src.monitor --url <url>  # add one URL to the queue and process it
+  python3 -m src.monitor --dry-run    # show what would happen, change nothing
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BASE))
+
+from src import state as state_mod  # noqa: E402
+from src.caption import build_caption  # noqa: E402
+from src.config import (CONFIG_PATH, enabled_destinations, enabled_sources,  # noqa: E402
+                        load_config)
+from src.downloader import download_video, post_info  # noqa: E402
+from src.editor import watermark_photo, watermark_video  # noqa: E402
+from src.publisher import ConsentMissingError, PublishError, publish  # noqa: E402
+
+QUEUE = BASE / "state" / "queue.txt"
+READY = BASE / "state" / "ready.json"
+DL = BASE / "state" / "downloads"
+
+
+def publish_commands(cfg: dict, record: dict) -> list[dict]:
+    """Publish commands for one watermarked record.
+
+    In draft mode these are saved only — nothing is published.
+    In auto mode the caller may run them, but only when page_id is set
+    and Professional Consent is approved; otherwise they stay queued.
+    """
+    settings = cfg.get("settings", {})
+    cap = settings.get("caption", {})
+    text = build_caption(record["caption"], cap.get("template", "{caption}"),
+                         int(cap.get("max_chars", 1024)),
+                         cap.get("hashtags") or [])
+    cmds = []
+    for d in cfg.get("destinations", []):
+        if not d.get("enabled", True):
+            continue
+        if d.get("kind") == "profile":
+            cmds.append({
+                "destination": d["name"],
+                "command": ["facebook-cli", "post", "create", "--message", text,
+                            "--file", record["watermarked"]],
+            })
+        else:
+            pid = d.get("page_id") or ""
+            if not pid:
+                cmds.append({"destination": d["name"],
+                             "blocked": "page_id missing — publish once via the "
+                             "browser, then post read returns owner_id"})
+            else:
+                cmds.append({
+                    "destination": d["name"],
+                    "command": ["facebook-cli", "pages", "posts", "create",
+                                "--page-id", pid, "--text", text,
+                                "--privacy", "PUBLIC",
+                                "--file", record["watermarked"]],
+                })
+    return cmds
+
+
+def refresh_ready(cfg: dict) -> dict:
+    """Recompute publish commands for ready posts from the CURRENT config,
+    so a page_id filled in later unblocks them without reprocessing."""
+    ready = state_mod.load_json(READY, {})
+    for rec in ready.values():
+        if "caption" in rec and "watermarked" in rec:
+            rec["publish"] = publish_commands(cfg, rec)
+    state_mod.save_json(READY, ready)
+    return ready
+
+
+def process_url(url: str, cfg: dict) -> dict:
+    """Process one post URL: read -> download -> edit -> record.
+
+    Skips posts already in seen.json (never repost the same post_id).
+    Returns the record (new or already-seen).
+    """
+    info = post_info(url)
+    pid = str(info["post_id"])
+    if state_mod.is_seen(pid):
+        print(f"SKIP already seen: {pid} ({info['caption'][:60]})")
+        return state_mod.load_json(state_mod.SEEN, {})[pid]
+
+    print(f"NEW: {pid} | {info['owner']} | {info['created']} | {info['caption']}")
+    DL.mkdir(parents=True, exist_ok=True)
+    wm_settings = cfg["settings"].get("watermark", {})
+    editor = cfg["settings"].get("editor", {})
+    is_photo = (info.get("media_type") or "").lower().find("photo") >= 0
+    raw = DL / f"{pid}.{'jpg' if is_photo else 'mp4'}"
+    wm = DL / f"{pid}-watermarked.{'jpg' if is_photo else 'mp4'}"
+    if not raw.exists():
+        download_video(url, raw)
+    if not wm.exists():
+        if is_photo:
+            watermark_photo(raw, wm, size=int(wm_settings.get("size_px", 320)),
+                            margin=int(wm_settings.get("margin_px", 30)))
+        else:
+            watermark_video(
+                raw, wm,
+                size_px=int(wm_settings.get("size_px", 194)),
+                margin=int(wm_settings.get("margin_px", 30)),
+                position=wm_settings.get("position", "bottom-right"),
+                crop_to_9x16=bool(editor.get("crop_to_9x16", False)),
+                max_duration_seconds=int(editor.get("max_duration_seconds", 0)),
+                loudnorm=bool(editor.get("loudnorm", False)),
+            )
+    record = {**info, "raw": str(raw), "watermarked": str(wm)}
+    state_mod.mark_seen(pid, record)
+    return record
+
+
+def process_queue(cfg: dict, urls: list[str], limit: int,
+                  dry_run: bool = False) -> tuple[list[str], list[str]]:
+    """Process up to ``limit`` URLs. Returns (done, remaining)."""
+    ready = refresh_ready(cfg)
+    done, remaining = [], []
+    for url in urls[:limit]:
+        if dry_run:
+            print(f"[dry-run] would process {url}")
+            remaining.append(url)
+            continue
+        rec = process_url(url, cfg)
+        rec["publish"] = publish_commands(cfg, rec)
+        ready[str(rec["post_id"])] = rec
+        done.append(url)
+    remaining += urls[limit:]
+    state_mod.save_json(READY, ready)
+    return done, remaining
+
+
+def publish_ready(cfg: dict, token: str = "") -> None:
+    """Auto mode: publish every ready post to destinations not yet done.
+
+    Each (post_id, destination) is published at most once — see
+    state.mark_published. Consent errors leave the post queued.
+    """
+    ready = state_mod.load_json(READY, {})
+    for pid, rec in ready.items():
+        settings = cfg.get("settings", {})
+        cap = settings.get("caption", {})
+        text = build_caption(rec["caption"], cap.get("template", "{caption}"),
+                             int(cap.get("max_chars", 1024)),
+                             cap.get("hashtags") or [])
+        for dest in cfg.get("destinations", []):
+            if not dest.get("enabled", True):
+                continue
+            name = dest["name"]
+            if state_mod.is_published(pid, name):
+                continue
+            try:
+                result = publish(dest, text, rec["watermarked"], token)
+            except ConsentMissingError as exc:
+                print(f"  ⏸ {name}: {exc}")
+                continue
+            except PublishError as exc:
+                print(f"  ❌ {name}: {exc}")
+                continue
+            state_mod.mark_published(pid, name, result)
+            print(f"  ✅ published to {name}: {result}")
+
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(prog="src.monitor")
+    ap.add_argument("--url", action="append", default=[])
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--config", default=str(CONFIG_PATH))
+    a = ap.parse_args(argv)
+
+    cfg = load_config(a.config)
+    print(f"Sources enabled: {[s['name'] for s in enabled_sources(cfg)]}")
+    print(f"Destinations enabled: {[d['name'] for d in enabled_destinations(cfg)]}")
+    settings = cfg["settings"]
+    print(f"Publish mode: {settings['publish']['mode']} | "
+          f"check every {settings['check_every_minutes']} min | "
+          f"max {settings['max_posts_per_check']} per check")
+
+    if a.url:
+        QUEUE.parent.mkdir(parents=True, exist_ok=True)
+        existing = QUEUE.read_text().splitlines() if QUEUE.exists() else []
+        for u in a.url:
+            if u not in existing:
+                existing.append(u)
+        QUEUE.write_text("\n".join(existing) + "\n")
+
+    urls = [l.strip() for l in QUEUE.read_text().splitlines()
+            if l.strip()] if QUEUE.exists() else []
+    refresh_ready(cfg)
+    if not urls:
+        print("Queue is empty (state/queue.txt). Add a post URL with --url, "
+              "or wait for the browser check to fill it.")
+        print("Sources to check next:")
+        for s in enabled_sources(cfg):
+            print(f"  - {s['name']}: {s['url']}")
+        return
+
+    done, remaining = process_queue(cfg, urls,
+                                    int(settings["max_posts_per_check"]),
+                                    dry_run=a.dry_run)
+    QUEUE.write_text("\n".join(remaining) + ("\n" if remaining else ""))
+    ready = state_mod.load_json(READY, {})
+    print(f"\nProcessed {len(done)}, ready in state/ready.json: {len(ready)}, "
+          f"remaining in queue: {len(remaining)}")
+    if settings["publish"]["mode"] == "draft":
+        print("Mode is draft: nothing was published. Review state/ready.json, "
+              "then publish each watermarked file.")
+    elif not a.dry_run:
+        from src.config import env
+        publish_ready(cfg, token=env("FB_PAGE_ACCESS_TOKEN"))
+
+
+if __name__ == "__main__":
+    main()

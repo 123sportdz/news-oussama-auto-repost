@@ -1,0 +1,8 @@
+yt-dlp>=2024.1.0
+pillow>=10.0.0
+pyyaml>=6.0
+
+# Optional: the dashboard uses only the Python standard library,
+# so Flask is NOT required. Install it only if you want to extend
+# the dashboard with Flask later:
+# flask>=3.0.0
