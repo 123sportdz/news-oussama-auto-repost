@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -165,26 +166,62 @@ def refresh_ready(cfg: dict) -> dict:
     return ready
 
 
+def media_ok(path: Path, is_photo: bool = False) -> bool:
+    """True when a downloaded/edited media file is complete and readable.
+
+    A killed ffmpeg leaves a big file behind with no moov atom — size
+    alone cannot tell it apart from a good file (seen 2026-11-20: a
+    39.8 MB watermarked mp4 was corrupt). ffprobe/PIL actually reads it.
+    """
+    if not path.exists() or path.stat().st_size == 0:
+        return False
+    if is_photo:
+        try:
+            from PIL import Image
+            with Image.open(path) as im:
+                im.verify()
+            return True
+        except Exception:  # noqa: BLE001 — any unreadable image is bad
+            return False
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(path)],
+            text=True, capture_output=True, timeout=30)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+    try:
+        return float((result.stdout or "0").strip() or 0) > 0
+    except ValueError:
+        return False
+
+
 def process_url(url: str, cfg: dict) -> dict:
     """Process one post URL: read -> download -> edit -> record.
 
-    Skips posts already in seen.json (never repost the same post_id).
+    Skips posts already in seen.json (never repost the same post_id) —
+    unless their watermarked file is missing or corrupt, in which case
+    the post is re-processed instead of trusting a broken file.
     Returns the record (new or already-seen).
     """
     info = post_info(url)
     pid = str(info["post_id"])
+    is_photo = (info.get("media_type") or "").lower().find("photo") >= 0
+    wm = DL / f"{pid}-watermarked.{'jpg' if is_photo else 'mp4'}"
     if state_mod.is_seen(pid):
-        print(f"SKIP already seen: {pid} ({info['caption'][:60]})")
-        return state_mod.load_json(state_mod.SEEN, {})[pid]
+        seen = state_mod.load_json(state_mod.SEEN, {})
+        if media_ok(wm, is_photo):
+            print(f"SKIP already seen: {pid} ({info['caption'][:60]})")
+            return seen[pid]
+        print(f"seen {pid} but watermarked file is missing/corrupt — "
+              f"re-processing")
 
     print(f"NEW: {pid} | {info['owner']} | {info['created']} | {info['caption']}")
     DL.mkdir(parents=True, exist_ok=True)
     wm_settings = cfg["settings"].get("watermark", {})
     editor = cfg["settings"].get("editor", {})
-    is_photo = (info.get("media_type") or "").lower().find("photo") >= 0
     raw = DL / f"{pid}.{'jpg' if is_photo else 'mp4'}"
-    wm = DL / f"{pid}-watermarked.{'jpg' if is_photo else 'mp4'}"
-    if not raw.exists():
+    if not media_ok(raw, is_photo):
         download_video(url, raw)
     content_hash = file_sha256(raw)
     seen = state_mod.load_json(state_mod.SEEN, {})
@@ -195,7 +232,7 @@ def process_url(url: str, cfg: dict) -> dict:
         state_mod.mark_seen(pid, {**info, "content_hash": content_hash,
                                   "duplicate_of": dup})
         return seen[dup]
-    if not wm.exists():
+    if not media_ok(wm, is_photo):
         if is_photo:
             watermark_photo(raw, wm, size=int(wm_settings.get("size_px", 320)),
                             margin=int(wm_settings.get("margin_px", 30)))

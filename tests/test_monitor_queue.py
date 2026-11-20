@@ -1,9 +1,37 @@
 """Tests for process_queue: incremental progress + failure isolation."""
 import unittest
+from unittest import mock
 
 from src import monitor as mon
 from src import state as state_mod
 from src.monitor import QUEUE
+
+
+class MediaOkTest(unittest.TestCase):
+    def test_valid_duration_is_ok(self):
+        import subprocess as sp
+        import tempfile
+        from pathlib import Path
+        path = Path(tempfile.mkdtemp()) / "v.mp4"
+        path.write_bytes(b"fake")
+        ok = sp.CompletedProcess(args=["ffprobe"], returncode=0,
+                                 stdout="185.13\n", stderr="")
+        with mock.patch.object(mon.subprocess, "run", return_value=ok):
+            self.assertTrue(mon.media_ok(path))
+        with mock.patch.object(mon.subprocess, "run",
+                               return_value=sp.CompletedProcess(
+                                   args=["ffprobe"], returncode=0,
+                                   stdout="", stderr="moov atom not found")):
+            self.assertFalse(mon.media_ok(path))
+
+    def test_missing_or_empty_is_not_ok(self):
+        import tempfile
+        from pathlib import Path
+        d = Path(tempfile.mkdtemp())
+        self.assertFalse(mon.media_ok(d / "nope.mp4"))
+        empty = d / "empty.mp4"
+        empty.write_bytes(b"")
+        self.assertFalse(mon.media_ok(empty))
 
 
 class RunLockTest(unittest.TestCase):
