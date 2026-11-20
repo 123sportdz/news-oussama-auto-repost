@@ -16,7 +16,7 @@ settings:
     loudnorm: false
     cover_frame_seconds: 3.0
   publish:
-    mode: draft
+    mode: auto
   content_origin: Clips originate from the user's own live broadcasts; source pages
     repost them.
 sources:
