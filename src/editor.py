@@ -77,7 +77,7 @@ def watermark_video(inp: Path | str, out: Path | str, size_px: int = 194,
     cmd = build_ffmpeg_command(inp, out, size_px, margin, position,
                                crop_to_9x16, max_duration_seconds, loudnorm)
     print("running:", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, timeout=300)
     print(f"video: {inp} -> {out}")
     return Path(out)
 
@@ -105,5 +105,5 @@ def cover_frame(video: Path | str, out: Path | str,
     cmd = ["ffmpeg", "-y", "-ss", str(seconds), "-i", str(video),
            "-frames:v", "1", str(out)]
     print("running:", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, timeout=120)
     return Path(out)

@@ -35,7 +35,11 @@ def post_info(url: str, facebook_cli: str = FACEBOOK_CLI) -> dict:
 def _post_info_cli(url: str, facebook_cli: str = FACEBOOK_CLI) -> dict:
     cmd = [facebook_cli, "post", "read", "--url", url]
     print("+", " ".join(cmd))
-    result = subprocess.run(cmd, text=True, capture_output=True)
+    try:
+        result = subprocess.run(cmd, text=True, capture_output=True,
+                                timeout=60)
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f"post read timed out for {url}")
     try:
         data = json.loads(result.stdout)
     except json.JSONDecodeError:
@@ -67,7 +71,11 @@ def video_info(url: str, ytdlp: str = "yt-dlp") -> dict:
     """Post metadata from yt-dlp --dump-json (public posts, no login)."""
     cmd = [ytdlp, "--dump-json", "--no-download", url]
     print("+", " ".join(cmd))
-    result = subprocess.run(cmd, text=True, capture_output=True)
+    try:
+        result = subprocess.run(cmd, text=True, capture_output=True,
+                                timeout=90)
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f"yt-dlp metadata timed out for {url}")
     try:
         data = json.loads(result.stdout)
     except json.JSONDecodeError:
@@ -93,7 +101,11 @@ def download_video(url: str, out_path: Path | str) -> Path:
     out_path = Path(out_path)
     cmd = ["yt-dlp", "--no-playlist", "-o", str(out_path), url]
     print("+", " ".join(cmd))
-    result = subprocess.run(cmd, text=True, capture_output=True)
+    try:
+        result = subprocess.run(cmd, text=True, capture_output=True,
+                                timeout=300)
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f"download timed out for {url}")
     if result.returncode != 0 or not out_path.exists():
         print(result.stdout[-2000:])
         print(result.stderr[-2000:])

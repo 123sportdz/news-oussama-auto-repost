@@ -11,6 +11,7 @@ state/queue.txt
 state/last_action.json
 state/stats.json
 state/diagnostics.json
+state/failed.txt
 *.mp4
 *.mov
 

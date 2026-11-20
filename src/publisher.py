@@ -83,7 +83,11 @@ def publish_page_cli(page_id: str, text: str, video_path: Path | str,
     cmd = [facebook_cli, "pages", "posts", "create", "--page-id", page_id,
            "--text", text, "--privacy", "PUBLIC", "--file", str(video_path)]
     print("+", " ".join(cmd))
-    result = subprocess.run(cmd, text=True, capture_output=True)
+    try:
+        result = subprocess.run(cmd, text=True, capture_output=True,
+                                timeout=180)
+    except subprocess.TimeoutExpired:
+        raise PublishError("facebook-cli publish timed out")
     out = (result.stdout or "") + (result.stderr or "")
     if CONSENT_ERROR in out:
         raise ConsentMissingError(BROWSER_INSTRUCTIONS)
@@ -101,7 +105,11 @@ def publish_profile_cli(text: str, video_path: Path | str,
     cmd = [facebook_cli, "post", "create", "--message", text,
            "--file", str(video_path)]
     print("+", " ".join(cmd))
-    result = subprocess.run(cmd, text=True, capture_output=True)
+    try:
+        result = subprocess.run(cmd, text=True, capture_output=True,
+                                timeout=180)
+    except subprocess.TimeoutExpired:
+        raise PublishError("facebook-cli profile publish timed out")
     if result.returncode != 0:
         raise PublishError(
             f"facebook-cli profile publish failed: {(result.stdout + result.stderr)[:500]}")

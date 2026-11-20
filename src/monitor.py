@@ -214,20 +214,41 @@ def process_url(url: str, cfg: dict) -> dict:
     return record
 
 
+FAILED = BASE / "state" / "failed.txt"
+
+
 def process_queue(cfg: dict, urls: list[str], limit: int,
                   dry_run: bool = False) -> tuple[list[str], list[str]]:
-    """Process up to ``limit`` URLs. Returns (done, remaining)."""
+    """Process up to ``limit`` URLs. Returns (done, remaining).
+
+    Progress is saved after EVERY url (ready.json + queue.txt), and one
+    failing url is recorded in state/failed.txt instead of stalling or
+    losing the whole batch — a hung or broken download used to block
+    everything with no timeout and no saved progress.
+    """
     ready = refresh_ready(cfg)
     done, remaining = [], []
-    for url in urls[:limit]:
+    for i, url in enumerate(urls[:limit]):
         if dry_run:
             print(f"[dry-run] would process {url}")
             remaining.append(url)
             continue
-        rec = process_url(url, cfg)
+        try:
+            rec = process_url(url, cfg)
+        except (Exception, SystemExit) as exc:  # noqa: BLE001
+            # SystemExit is what process_url raises on download/read
+            # failures — it is a BaseException, not an Exception.
+            print(f"FAILED {url}: {exc}")
+            FAILED.parent.mkdir(parents=True, exist_ok=True)
+            with open(FAILED, "a", encoding="utf-8") as fh:
+                fh.write(f"{url} | {exc}\n")
+            continue
         rec["publish"] = publish_commands(cfg, rec)
         ready[str(rec["post_id"])] = rec
         done.append(url)
+        state_mod.save_json(READY, ready)
+        rest = urls[i + 1:]
+        QUEUE.write_text("\n".join(rest) + ("\n" if rest else ""))
     remaining += urls[limit:]
     state_mod.save_json(READY, ready)
     return done, remaining
