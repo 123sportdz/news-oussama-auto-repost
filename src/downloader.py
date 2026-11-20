@@ -8,6 +8,7 @@ URL — the actual file comes from yt-dlp.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -18,8 +19,20 @@ def post_info(url: str, facebook_cli: str = FACEBOOK_CLI) -> dict:
     """Read a post/reel URL and return its metadata.
 
     Returns: post_id, caption, owner, created (local time), url, media_type.
-    Raises SystemExit when the post cannot be read.
+    Tries facebook-cli first; when it cannot see the post (it returns
+    POST_NOT_FOUND for fresh reels even though they are public — verified
+    2026-11-20), falls back to yt-dlp metadata, which reads the same
+    public post fine. Raises SystemExit only when both fail.
     """
+    try:
+        return _post_info_cli(url, facebook_cli)
+    except SystemExit as exc:
+        print(f"post read via facebook-cli failed ({exc}); "
+              f"trying yt-dlp metadata …")
+        return video_info(url)
+
+
+def _post_info_cli(url: str, facebook_cli: str = FACEBOOK_CLI) -> dict:
     cmd = [facebook_cli, "post", "read", "--url", url]
     print("+", " ".join(cmd))
     result = subprocess.run(cmd, text=True, capture_output=True)
@@ -38,6 +51,40 @@ def post_info(url: str, facebook_cli: str = FACEBOOK_CLI) -> dict:
         "created": (p.get("post_created_at") or {}).get("user_local"),
         "url": p.get("url") or url,
         "media_type": p.get("media_type"),
+    }
+
+
+_TITLE_PREFIX_RE = re.compile(r"^[\d.,KM]+ views · [\d.,KM]+ reactions \| ")
+
+
+def _clean_title(title: str) -> str:
+    """Strip yt-dlp's '3.9K views · 247 reactions | <caption> | <page>'."""
+    title = _TITLE_PREFIX_RE.sub("", title or "")
+    return title.rsplit(" | ", 1)[0] if " | " in title else title
+
+
+def video_info(url: str, ytdlp: str = "yt-dlp") -> dict:
+    """Post metadata from yt-dlp --dump-json (public posts, no login)."""
+    cmd = [ytdlp, "--dump-json", "--no-download", url]
+    print("+", " ".join(cmd))
+    result = subprocess.run(cmd, text=True, capture_output=True)
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        raise SystemExit(f"yt-dlp metadata failed for {url}: "
+                         f"{(result.stdout + result.stderr)[:500]}")
+    match = re.search(r"/(?:reel/|watch/\?v=|videos/|video\.php\?v=)(\d{6,})",
+                      url)
+    pid = match.group(1) if match else str(data.get("id"))
+    caption = (data.get("description") or "").strip() or \
+        _clean_title(data.get("title") or "")
+    return {
+        "post_id": pid,
+        "caption": caption,
+        "owner": (data.get("uploader") or "").strip() or None,
+        "created": data.get("upload_date"),
+        "url": url,
+        "media_type": "video",
     }
 
 
