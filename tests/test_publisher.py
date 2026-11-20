@@ -15,24 +15,24 @@ class TokenForDestinationTest(unittest.TestCase):
     def test_per_page_token_beats_shared_fallback(self):
         with mock.patch.dict(
                 "os.environ",
-                {"FB_PAGE_ACCESS_TOKEN_61552757798044": "token-news",
+                {"FB_PAGE_ACCESS_TOKEN_147624121772177": "token-news",
                  "FB_PAGE_ACCESS_TOKEN": "token-shared"},
                 clear=False):
             got = publisher.token_for_destination(
-                {"name": "NewsDz9", "page_id": "61552757798044"},
+                {"name": "NewsDz9", "page_id": "147624121772177"},
                 fallback="token-shared")
         self.assertEqual(got, "token-news")
 
     def test_each_page_gets_its_own_token(self):
         with mock.patch.dict(
                 "os.environ",
-                {"FB_PAGE_ACCESS_TOKEN_61552757798044": "token-news",
-                 "FB_PAGE_ACCESS_TOKEN_100083258325099": "token-dz7"},
+                {"FB_PAGE_ACCESS_TOKEN_147624121772177": "token-news",
+                 "FB_PAGE_ACCESS_TOKEN_107469321989814": "token-dz7"},
                 clear=False):
             news = publisher.token_for_destination(
-                {"name": "NewsDz9", "page_id": "61552757798044"})
+                {"name": "NewsDz9", "page_id": "147624121772177"})
             dz7 = publisher.token_for_destination(
-                {"name": "aljazaer07", "page_id": "100083258325099"})
+                {"name": "aljazaer07", "page_id": "107469321989814"})
         self.assertEqual(news, "token-news")
         self.assertEqual(dz7, "token-dz7")
         self.assertNotEqual(news, dz7)
@@ -41,24 +41,24 @@ class TokenForDestinationTest(unittest.TestCase):
         with mock.patch.dict(
                 "os.environ",
                 {"FB_PAGE_TOKEN_NEWSDZ9": "token-named",
-                 "FB_PAGE_ACCESS_TOKEN_61552757798044": "token-news"},
+                 "FB_PAGE_ACCESS_TOKEN_147624121772177": "token-news"},
                 clear=False):
             got = publisher.token_for_destination(
-                {"name": "NewsDz9", "page_id": "61552757798044",
+                {"name": "NewsDz9", "page_id": "147624121772177",
                  "token_env": "FB_PAGE_TOKEN_NEWSDZ9"})
         self.assertEqual(got, "token-named")
 
     def test_fallback_when_no_per_page_token(self):
         with mock.patch.dict("os.environ", {}, clear=True):
             got = publisher.token_for_destination(
-                {"name": "NewsDz9", "page_id": "61552757798044"},
+                {"name": "NewsDz9", "page_id": "147624121772177"},
                 fallback="token-shared")
         self.assertEqual(got, "token-shared")
 
     def test_empty_when_nothing_set(self):
         with mock.patch.dict("os.environ", {}, clear=True):
             got = publisher.token_for_destination(
-                {"name": "NewsDz9", "page_id": "61552757798044"})
+                {"name": "NewsDz9", "page_id": "147624121772177"})
         self.assertEqual(got, "")
 
 
@@ -78,10 +78,10 @@ class PublishRoutingTest(unittest.TestCase):
         try:
             with mock.patch.dict(
                     "os.environ",
-                    {"FB_PAGE_ACCESS_TOKEN_61552757798044": "token-news"},
+                    {"FB_PAGE_ACCESS_TOKEN_147624121772177": "token-news"},
                     clear=False):
                 publisher.publish(
-                    {"name": "NewsDz9", "page_id": "61552757798044"},
+                    {"name": "NewsDz9", "page_id": "147624121772177"},
                     "caption", Path("x.mp4"), token="")
         finally:
             publisher.publish_page_graph = orig_graph
@@ -100,11 +100,11 @@ class PublishRoutingTest(unittest.TestCase):
         try:
             with mock.patch.dict("os.environ", {}, clear=True):
                 publisher.publish(
-                    {"name": "NewsDz9", "page_id": "61552757798044"},
+                    {"name": "NewsDz9", "page_id": "147624121772177"},
                     "caption", Path("x.mp4"), token="")
         finally:
             publisher.publish_page_cli = orig_cli
-        self.assertEqual(calls["page_id"], "61552757798044")
+        self.assertEqual(calls["page_id"], "147624121772177")
 
 
 if __name__ == "__main__":

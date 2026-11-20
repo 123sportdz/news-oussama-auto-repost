@@ -33,11 +33,11 @@ sources:
 destinations:
 - url: https://www.facebook.com/NewsDz9
   name: NewsDz9
-  page_id: '61552757798044'
+  page_id: '147624121772177'
   enabled: true
 - url: https://www.facebook.com/aljazaer07/
   name: aljazaer07
-  page_id: '100083258325099'
+  page_id: '107469321989814'
   enabled: true
 - url: https://www.facebook.com/profile.php?id=61583494301111
   name: Oussama — profile

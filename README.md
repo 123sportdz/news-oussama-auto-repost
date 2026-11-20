@@ -97,7 +97,7 @@ sources:
 destinations:
   - url: https://www.facebook.com/NewsDz9
     name: NewsDz9
-    page_id: '61552757798044'
+    page_id: '147624121772177'
     enabled: true
 settings:
   check_every_minutes: 30
@@ -133,8 +133,8 @@ available" مع أنها عمومية — تم التحقق في 2026-11-20). ل
 
 | الصفحة | page_id | الريل التجريبي |
 |---|---|---|
-| NewsDz9 — "News Dz (بلادي أنفو)"، 9.9K متابع | `61552757798044` | https://www.facebook.com/reel/1169537658859941 |
-| aljazaer07 — "الجزائر سبعة"، 37K متابع | `100083258325099` | https://www.facebook.com/reel/980161941419171 |
+| NewsDz9 — "News Dz (بلادي أنفو)"، 9.9K متابع | `147624121772177` | https://www.facebook.com/reel/1169537658859941 |
+| aljazaer07 — "الجزائر سبعة"، 37K متابع | `107469321989814` | https://www.facebook.com/reel/980161941419171 |
 
 - المقطع الأصلي: Goal Algeria، ريل https://facebook.com/reel/1668308364143510/
   ("ثنائية مازة و حاج موسى 🎩🪄"، 7 ثواني، 720×1280).
@@ -249,8 +249,8 @@ The ID is not shown in the Facebook UI. Proven method:
 
 | Page | page_id | Test reel |
 |---|---|---|
-| NewsDz9 — "News Dz (بلادي أنفو)", 9.9K followers | `61552757798044` | https://www.facebook.com/reel/1169537658859941 |
-| aljazaer07 — "الجزائر سبعة", 37K followers | `100083258325099` | https://www.facebook.com/reel/980161941419171 |
+| NewsDz9 — "News Dz (بلادي أنفو)", 9.9K followers | `147624121772177` | https://www.facebook.com/reel/1169537658859941 |
+| aljazaer07 — "الجزائر سبعة", 37K followers | `107469321989814` | https://www.facebook.com/reel/980161941419171 |
 
 Original clip: Goal Algeria reel https://facebook.com/reel/1668308364143510/
 ("ثنائية مازة و حاج موسى 🎩🪄", 7s, 720×1280). yt-dlp download + ffmpeg

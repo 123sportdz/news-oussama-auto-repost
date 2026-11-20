@@ -3,17 +3,15 @@
 Use this instead of — or alongside — the Hatch/Muse Facebook connect
 flow (`agent.meta.ai`), which is currently blocked by a browser
 extension in your Chrome. Your own **Business-type** app **NEWS
-OUSSAMA** (creation prepared 2026-11-20 in the `elhiwar_dz` portfolio,
-with the "Manage everything on your Page" use case — click Create app
-to finish it) can issue the tokens the Graph API route needs.
+OUSSAMA** was **created 2026-11-20** in the `elhiwar_dz` portfolio,
+with the "Manage everything on your Page" use case. All three Pages
+permissions (`pages_show_list`, `pages_read_engagement`,
+`pages_manage_posts`) are "Ready for testing" and an Explorer user
+token was already generated. What is left: reveal the App Secret
+(Settings → Basic → Show — Facebook asks for your password), do the
+long-lived exchange below, and fetch the two Page tokens.
 
-> The old route via the **dzبلادي** app (App ID `931118869751993`) is
-> DEAD — dzبلادي is a Consumer-type app and Meta offers it no
-> `pages_manage_posts` permission from any side (Use Cases, Graph API
-> Explorer, App Review). Do not go back to it. Fill in the NEWS
-> OUSSAMA App ID below once the app is created.
-
-- NEWS OUSSAMA App ID: `<fill in after creation — Settings → Basic → App ID>`
+- NEWS OUSSAMA App ID: `4770375176523569` (In development)
 
 > Never paste a token or the App Secret in chat, in a browser page,
 > or in any file that gets committed. Tokens go only in the local
@@ -25,12 +23,22 @@ Page tokens are scoped to **one Page each**. You need two:
 
 | Page | Page ID | `.env` line |
 | --- | --- | --- |
-| NewsDz9 | `61552757798044` | `FB_PAGE_ACCESS_TOKEN_61552757798044=<token>` |
-| الجزائر سبعة | `100083258325099` | `FB_PAGE_ACCESS_TOKEN_100083258325099=<token>` |
+| NewsDz9 | `147624121772177` | `FB_PAGE_ACCESS_TOKEN_147624121772177=<token>` |
+| الجزائر سبعة | `107469321989814` | `FB_PAGE_ACCESS_TOKEN_107469321989814=<token>` |
 
 The code (`src/publisher.py`, branch `fix/per-page-graph-tokens`)
 already picks the right token per destination; the old single
 `FB_PAGE_ACCESS_TOKEN` is only a fallback now.
+
+> **ID trap — use the Graph IDs above, not the reel owner IDs.**
+> The IDs you get from a published reel's `owner_id`
+> (`61552757798044` for NewsDz9, `100083258325099` for الجزائر سبعة)
+> are the Pages' *profile* IDs in the new Pages experience. The
+> Graph API rejects them with `Unsupported get request... missing
+> permissions` (code 100, subcode 33). The Graph IDs in the table
+> are the ones the API accepts — verify one any time in the
+> Explorer with `GET /NewsDz9` or `GET /aljazaer07`, which resolves
+> the username to the Graph ID.
 
 ## Steps (in your browser, logged in as Oussama Tonis)
 
@@ -58,6 +66,17 @@ already picks the right token per destination; the old single
      -d "access_token=<LONG_LIVED_USER_TOKEN>"
    ```
    Copy the `access_token` for each Page into `.env` as above.
+   Note: `/me/accounts` returns only your **personal** Pages — News
+   Dz IS among them. الجزائر سبعة belongs to the `elhiwar_dz`
+   portfolio, so it does **not** appear there even though you have
+   full control of it. Get its token directly from the Page node:
+   ```
+   curl -G "https://graph.facebook.com/v21.0/107469321989814" \
+     -d "fields=id,name,access_token" \
+     -d "access_token=<LONG_LIVED_USER_TOKEN>"
+   ```
+   (verified live 2026-11-20: the direct call returns the Page
+   access token). Copy the `access_token` for each Page into `.env` as above.
 5. **Verify before trusting a token** — for each Page token, check:
    - `tasks` in step 4 includes `CREATE_CONTENT` — without it the
      token cannot publish, and the fix is your Page role, not code.
@@ -75,13 +94,15 @@ but it dies if you change your Facebook password, revoke the app, or
 lose your role on the Page. If publishing suddenly fails months from
 now, repeat steps 2–4 — do not debug the code first.
 
-## Open unknowns (check while you are in the app dashboard)
+## Resolved while setting this up (2026-11-20)
 
-- A Business app created with the "Manage everything on your Page"
-  use case should offer `pages_manage_posts` in the Explorer — if it
-  does not appear, that is the next blocker, and the fix is in the
-  app's Use Cases, not in code.
-- NewsDz9 is a standalone Page (in no portfolio) while NEWS OUSSAMA
-  lives in `elhiwar_dz`. `/me/accounts` lists every Page you admin, so it
-  should still return NewsDz9 — if it does not, that is the answer,
-  and the fix is to grant the app access from NewsDz9's settings.
+- The three Pages permissions are "Ready for testing" on NEWS
+  OUSSAMA — no App Review needed while the app is in development
+  and you are its admin.
+- NewsDz9 IS returned by `/me/accounts` (with `CREATE_CONTENT`).
+  Only the portfolio Page (الجزائر سبعة) needs the direct Page-node
+  call in step 4.
+- You already have full control of both target Pages — no access
+  grant was needed. (NewsDz9: you full control; Oussama Wanege and
+  Oussama Boulegheb partial. الجزائر سبعة: full control for you,
+  Oussama Boulegheb and Oussama Wanege, via `elhiwar_dz`.)
