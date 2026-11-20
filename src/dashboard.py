@@ -45,18 +45,75 @@ STATUS = BASE / "state" / "last_action.json"
 _JOBS = {"running": 0}
 
 CSS = """
-body{font-family:system-ui,sans-serif;max-width:900px;margin:0 auto;
-padding:16px;background:#111;color:#eee;direction:rtl}
-a{color:#f5c518} input,select,button{padding:6px;margin:2px}
-table{border-collapse:collapse;width:100%} td,th{border:1px solid #444;
-padding:6px;text-align:right;vertical-align:top}
-code{font-size:12px;word-break:break-all} .ok{color:#7CFC00} .bad{color:#f66}
-h1{color:#f5c518} form{display:inline}
-.status{padding:10px;border:1px solid #f5c518;border-radius:6px;margin:10px 0}
-.status.ok{border-color:#7CFC00} .status.bad{border-color:#f66}
-button.publish{background:#f5c518;color:#111;font-weight:bold}
-video{max-width:320px;max-height:240px;display:block;margin:4px 0}
-details{font-size:12px;color:#aaa}
+:root{--gold:#f5c518;--gold-dim:#c9a227;--bg:#0c0c0e;--card:#16171b;
+--card2:#1d1e24;--border:#26272e;--text:#f4f4f5;--muted:#9a9aa5;
+--green:#22c55e;--red:#ef4444;--radius:14px}
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+margin:0;background:var(--bg);color:var(--text);direction:rtl;line-height:1.6}
+.wrap{max-width:1060px;margin:0 auto;padding:20px 16px 60px}
+header{display:flex;align-items:center;gap:14px;padding:18px 20px;
+background:linear-gradient(135deg,#16171b,#0c0c0e 60%);
+border:1px solid var(--border);border-radius:var(--radius);margin-bottom:18px}
+header img.logo{width:64px;height:64px;border-radius:50%;
+border:2px solid var(--gold);background:#000;flex:none}
+header h1{margin:0;font-size:22px;color:var(--gold);line-height:1.3}
+header p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.mode-badge{margin-inline-start:auto;flex:none;background:var(--gold);
+color:#111;font-weight:700;font-size:13px;padding:6px 14px;border-radius:999px}
+.mode-badge.draft{background:#3f3f46;color:#fff}
+a{color:var(--gold);text-decoration:none}
+a:hover{text-decoration:underline}
+.card{background:var(--card);border:1px solid var(--border);
+border-radius:var(--radius);padding:18px 20px;margin-bottom:18px}
+.card h2{margin:0 0 12px;font-size:17px;color:var(--gold)}
+.card h2 .count{color:var(--muted);font-size:13px;font-weight:400}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+.stat{background:var(--card);border:1px solid var(--border);
+border-radius:var(--radius);padding:14px 16px}
+.stat .num{font-size:26px;font-weight:800;color:var(--gold);line-height:1.1}
+.stat .lbl{color:var(--muted);font-size:13px}
+input,select,textarea{background:var(--card2);color:var(--text);
+border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin:2px}
+input:focus,select:focus{outline:2px solid var(--gold);outline-offset:1px}
+button{background:#26272e;color:var(--text);border:1px solid var(--border);
+border-radius:9px;padding:8px 16px;margin:2px;cursor:pointer;font-size:14px}
+button:hover{border-color:var(--gold)}
+button.publish,button.primary{background:var(--gold);color:#111;
+font-weight:700;border-color:var(--gold)}
+button.publish:hover,button.primary:hover{background:#ffd83d}
+button.danger{background:transparent;color:var(--red);border-color:#5b2323}
+button:disabled{opacity:.5;cursor:wait}
+body.busy button.publish,body.busy button.primary{opacity:.55;pointer-events:none}
+form{display:inline}
+table{border-collapse:collapse;width:100%}
+td,th{border-bottom:1px solid var(--border);padding:10px 8px;
+text-align:right;vertical-align:middle}
+th{color:var(--muted);font-size:13px;font-weight:600}
+tr:hover td{background:var(--card2)}
+code{font-size:12px;word-break:break-all;background:#00000055;
+padding:2px 6px;border-radius:6px}
+.ok{color:var(--green)} .bad{color:var(--red)}
+.badge{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;
+font-weight:700;background:#26272e}
+.badge.ok{background:#052e16;color:var(--green)}
+.badge.warn{background:#451a03;color:#fbbf24}
+.status{padding:12px 16px;border-radius:10px;margin-bottom:18px;
+border:1px solid var(--gold);background:#1a1503}
+.status.ok{border-color:var(--green);background:#04160a}
+.status.bad{border-color:var(--red);background:#1c0505}
+.post-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.post{background:var(--card2);border:1px solid var(--border);
+border-radius:12px;padding:14px}
+.post video,.post img{width:100%;max-height:300px;object-fit:cover;
+border-radius:10px;display:block;margin-bottom:10px;background:#000}
+.post .cap{font-weight:600;margin-bottom:6px}
+.post .meta{color:var(--muted);font-size:13px;margin-bottom:10px}
+.post .actions{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+details{font-size:12px;color:var(--muted);margin-top:8px}
+footer{color:var(--muted);font-size:12px;text-align:center;margin-top:24px}
+@media(max-width:640px){.stats{grid-template-columns:1fr 1fr}
+.post-grid{grid-template-columns:1fr}header h1{font-size:18px}}
 """
 
 
@@ -259,6 +316,11 @@ class Handler(BaseHTTPRequestHandler):
                 "busy": _JOBS["running"] > 0,
                 "last_action": get_status(),
             }), "application/json; charset=utf-8")
+        if self.path == "/logo":
+            logo = BASE / "assets" / "watermark-320.png"
+            if logo.is_file():
+                return self._send_file(logo)
+            return self._send("<h1>404</h1>", status=404)
         if self.path.startswith("/file/"):
             found = _resolve_download(self.path[len("/file/"):].split("?")[0])
             if found is None:
@@ -443,7 +505,7 @@ def home_page() -> str:
     queue_urls = ([l.strip() for l in QUEUE.read_text().splitlines()
                    if l.strip()] if QUEUE.exists() else [])
 
-    ready_rows = []
+    ready_cards = []
     for pid, rec in ready.items():
         done = (published.get(pid) or {}).get("destinations", {})
         media = ""
@@ -453,42 +515,49 @@ def home_page() -> str:
                 media = (f'<video controls preload="metadata" '
                          f'src="/file/{esc(pid)}"></video>')
             else:
-                media = (f'<img src="/file/{esc(pid)}" '
-                         f'style="max-width:320px">')
-            media += f'<br><a href="/file/{esc(pid)}">⬇ تحميل الملف</a>'
+                media = f'<img src="/file/{esc(pid)}" alt="preview">'
+            media += f'<a href="/file/{esc(pid)}">⬇ تحميل الملف</a>'
         elif wm:
             media = f"<code>{esc(wm)}</code>"
-        dest_cells = []
+        dest_parts = []
         for p in rec.get("publish", []):
             name = p["destination"]
             if name in done:
-                dest_cells.append(f"{esc(name)}: ✅ منشور")
+                dest_parts.append(
+                    f'<span class="badge ok">{esc(name)}: ✅ منشور</span>')
             elif "blocked" in p:
-                dest_cells.append(f"{esc(name)}: ⏸ {esc(p['blocked'])}")
+                dest_parts.append(
+                    f'<span class="badge warn">{esc(name)}: ⏸ محظور</span>'
+                    f'<div style="font-size:12px;color:var(--muted)">'
+                    f'{esc(p["blocked"])}</div>')
             else:
-                dest_cells.append(
+                dest_parts.append(
                     f'<form method="post" action="/publish">'
                     f'<input type="hidden" name="pid" value="{esc(pid)}">'
                     f'<input type="hidden" name="destination" value="{esc(name)}">'
-                    f'<button class="publish">نشر إلى {esc(name)}</button>'
+                    f'<button class="publish">🚀 نشر إلى {esc(name)}</button>'
                     f'</form>')
-        actions = "<br>".join(dest_cells)
-        actions += (f'<br><form method="post" action="/publish-all">'
+        actions = "".join(dest_parts)
+        actions += (f'<form method="post" action="/publish-all">'
                     f'<input type="hidden" name="pid" value="{esc(pid)}">'
-                    f'<button class="publish">نشر للكل</button></form>'
+                    f'<button class="publish">🚀 نشر للكل</button></form>'
                     f'<form method="post" action="/delete-ready">'
                     f'<input type="hidden" name="pid" value="{esc(pid)}">'
-                    f'<button>🗑 حذف</button></form>')
+                    f'<button class="danger">🗑 حذف</button></form>')
         caption_form = (
             f'<form method="post" action="/set-caption">'
             f'<input type="hidden" name="pid" value="{esc(pid)}">'
             f'<input name="caption" value="{esc(rec.get("caption"))}" '
-            f'size="40"><button>✏️ حفظ النص</button></form>')
-        ready_rows.append([
-            esc(rec.get("owner")),
-            esc(rec.get("caption"))[:80] + "<br>" + caption_form,
-            media, actions,
-        ])
+            f'style="width:100%" placeholder="نص المنشور">'
+            f'<button>✏️ حفظ النص</button></form>')
+        ready_cards.append(f"""
+<div class="post">
+{media}
+<div class="cap">{esc(rec.get("caption"))}</div>
+<div class="meta">{esc(rec.get("owner") or "")} • {esc(rec.get("created") or "")}</div>
+{caption_form}
+<div class="actions">{actions}</div>
+</div>""")
 
     stats = state_mod.load_json(STATS, {})
     stats_rows = []
@@ -528,42 +597,69 @@ def home_page() -> str:
 <button>⚙️ حفظ الإعدادات</button>
 </form>"""
 
-    return f"""<!DOCTYPE html><html lang="ar"><head><meta charset="utf-8">
-<title>NEWS OUSSAMA — لوحة التحكم</title><style>{CSS}</style></head><body>
-<h1>🎬 NEWS OUSSAMA — لوحة التحكم</h1>
-{status_html}
-<p>الوضع: <b>{esc(settings.get('publish', {}).get('mode'))}</b> |
-فحص كل {esc(settings.get('check_every_minutes'))} دقيقة |
-حد أقصى {esc(settings.get('max_posts_per_check'))} منشور لكل فحص |
-شعار: {esc(settings.get('watermark', {}).get('position'))} {esc(settings.get('watermark', {}).get('size_px'))}px</p>
+    mode = (settings.get("publish", {}) or {}).get("mode", "draft")
+    mode_badge = (f'<span class="mode-badge">{"🚀 تلقائي" if mode == "auto" else "📝 مسودة"}</span>')
+    stats_cards = f"""
+<div class="stats">
+<div class="stat"><div class="num">{len(queue_urls)}</div><div class="lbl">في الطابور</div></div>
+<div class="stat"><div class="num">{len(ready)}</div><div class="lbl">جاهز للنشر</div></div>
+<div class="stat"><div class="num">{len(published)}</div><div class="lbl">منشور</div></div>
+<div class="stat"><div class="num">{len(seen)}</div><div class="lbl">معالَج</div></div>
+</div>"""
+    ready_html = ('<div class="post-grid">' + "".join(ready_cards) + '</div>'
+                  if ready_cards else
+                  '<p style="color:var(--muted)">لا توجد منشورات جاهزة — أضف رابط ريل واضغط "سحب الآن ⬇".</p>')
 
-<h2>المصادر</h2>
+    return f"""<!DOCTYPE html><html lang="ar"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEWS OUSSAMA — لوحة التحكم</title><style>{CSS}</style></head><body>
+<div class="wrap">
+<header>
+<img class="logo" src="/logo" alt="NEWS OUSSAMA">
+<div><h1>NEWS OUSSAMA</h1><p>إعادة نشر تلقائية • فحص كل {esc(settings.get('check_every_minutes'))} دقيقة • حد أقصى {esc(settings.get('max_posts_per_check'))} منشور</p></div>
+{mode_badge}
+</header>
+{status_html}
+{stats_cards}
+
+<div class="card">
+<h2>📥 أضف منشور للطابور</h2>
+{row_form("/queue", {"url": ""}, "أضف للطابور")}
+{row_form("/queue-process", {"url": ""}, "سحب الآن ⬇", "primary")}
+<form method="post" action="/process"><button class="primary">⬇ سحب ومعالجة الطابور ({len(queue_urls)})</button></form>
+</div>
+
+<div class="card">
+<h2>🎬 جاهز للنشر <span class="count">({len(ready)})</span></h2>
+{ready_html}
+</div>
+
+<div class="card">
+<h2>📺 المصادر</h2>
 {table(src_rows, ["الاسم", "الرابط", "مفعّل", "إجراءات"])}
 {row_form("/add-source", {"name": "", "url": ""}, "إضافة مصدر")}
+</div>
 
-<h2>الوجهات (صفحاتك)</h2>
+<div class="card">
+<h2>📄 الوجهات (صفحاتك)</h2>
 {table(dst_rows, ["الاسم", "page_id", "مفعّل", "إجراءات"])}
 {row_form("/add-destination", {"name": "", "url": "", "page_id": ""}, "إضافة وجهة")}
+</div>
 
-<h2>أضف منشور للطابور</h2>
-{row_form("/queue", {"url": ""}, "أضف للطابور")}
-{row_form("/queue-process", {"url": ""}, "سحب الآن ⬇")}
-<p>في الطابور الآن: {len(queue_urls)} منشور</p>
-<form method="post" action="/process"><button>⬇ سحب ومعالجة الطابور</button></form>
-
-<h2>جاهز للنشر ({len(ready)})</h2>
-{table(ready_rows, ["المصدر", "النص", "المعاينة + تحميل", "النشر"])}
-
+<div class="card">
 <h2>⚙️ الإعدادات</h2>
 {settings_form}
+</div>
 
+<div class="card">
 <h2>📊 إحصائيات المنشورات</h2>
 <form method="post" action="/refresh-stats"><button>🔄 تحديث الإحصائيات</button></form>
-{table(stats_rows, ["المنشور", "الوجهة", "الرابط", "التفاعل", "آخر تحديث"]) if stats_rows else "<p>لا توجد إحصائيات بعد — انشر منشورا ثم اضغط تحديث الإحصائيات.</p>"}
+{table(stats_rows, ["المنشور", "الوجهة", "الرابط", "التفاعل", "آخر تحديث"]) if stats_rows else "<p style='color:var(--muted)'>لا توجد إحصائيات بعد — انشر منشورا ثم اضغط تحديث الإحصائيات.</p>"}
+</div>
 
-<h2>السجل</h2>
-<p>منشورات معالجة (seen): {len(seen)} | منشورات منشورة: {len(published)}</p>
-<p><a href="/config.yaml">⬇ تحميل config.yaml</a></p>
+<p style="color:var(--muted)">منشورات معالجة (seen): {len(seen)} | منشورات منشورة: {len(published)} | <a href="/config.yaml">⬇ تحميل config.yaml</a></p>
+<footer>NEWS OUSSAMA • إعادة النشر التلقائية</footer>
+</div>
 <script>
 let wasBusy = false;
 async function poll() {{
@@ -575,6 +671,7 @@ async function poll() {{
       banner.textContent = s.last_action.message;
       banner.className = 'status ' + (s.last_action.ok ? 'ok' : 'bad');
     }}
+    document.body.classList.toggle('busy', !!s.busy);
     if (wasBusy && !s.busy) location.reload();
     wasBusy = s.busy;
   }} catch (e) {{}}
