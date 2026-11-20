@@ -8,6 +8,8 @@ state/seen.json
 state/ready.json
 state/published.json
 state/queue.txt
+state/last_action.json
+state/stats.json
 *.mp4
 *.mov
 
