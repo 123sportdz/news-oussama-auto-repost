@@ -10,6 +10,7 @@ state/published.json
 state/queue.txt
 state/last_action.json
 state/stats.json
+state/diagnostics.json
 *.mp4
 *.mov
 

@@ -35,6 +35,8 @@ sys.path.insert(0, str(BASE))
 from src.caption import build_caption  # noqa: E402
 from src.config import env, load_config, save_config  # noqa: E402
 from src import state as state_mod  # noqa: E402
+from src.diagnostics import DIAGNOSTICS, run_and_save  # noqa: E402
+from src.discover import discover_all  # noqa: E402
 from src.monitor import (DL, QUEUE, READY, _parse_window, in_publish_window,  # noqa: E402
                          next_window_start, process_queue, process_url,
                          publish_commands, refresh_ready)
@@ -241,6 +243,39 @@ def _refresh_stats_job() -> None:
         set_status(f"❌ خطأ أثناء تحديث الإحصائيات: {exc}", False)
 
 
+def _discover_job() -> None:
+    try:
+        cfg = load_config()
+        report = discover_all(cfg)
+        total_new = sum(r["new"] for r in report.values())
+        errors = [f"{name}: {r['error']}" for name, r in report.items()
+                  if r.get("error")]
+        if errors:
+            set_status("🔍 اكتشاف: " + " | ".join(errors), False)
+        elif total_new:
+            parts = [f"{name}: {r['new']} جديد" for name, r in report.items()
+                     if r["new"]]
+            set_status(f"🔍 اكتشف {total_new} منشور جديد — "
+                       + "، ".join(parts) + " — اضغط سحب ومعالجة الطابور")
+        else:
+            set_status("🔍 لا توجد منشورات جديدة في المصادر")
+    except Exception as exc:  # noqa: BLE001 — surfaced in the banner
+        set_status(f"❌ خطأ أثناء الاكتشاف: {exc}", False)
+
+
+def _diagnostics_job() -> None:
+    try:
+        checks = run_and_save()
+        bad = [c["name"] for c in checks if not c["ok"]]
+        if bad:
+            set_status(f"🩺 الفحص: {len(checks) - len(bad)}/{len(checks)} سليم — "
+                       f"مشاكل: {', '.join(bad)}", False)
+        else:
+            set_status(f"🩺 الفحص: كل شيء سليم ({len(checks)}/{len(checks)})")
+    except Exception as exc:  # noqa: BLE001 — surfaced in the banner
+        set_status(f"❌ خطأ أثناء الفحص: {exc}", False)
+
+
 def _run_in_background(target, *args) -> None:
     def wrapper() -> None:
         _JOBS["running"] += 1
@@ -416,6 +451,14 @@ class Handler(BaseHTTPRequestHandler):
             set_status("⏳ جارٍ تحديث الإحصائيات …")
             _run_in_background(_refresh_stats_job)
             return self._redirect_home()
+        elif path == "/discover":
+            set_status("⏳ جارٍ اكتشاف منشورات جديدة من المصادر …")
+            _run_in_background(_discover_job)
+            return self._redirect_home()
+        elif path == "/diagnostics":
+            set_status("⏳ جارٍ فحص النظام …")
+            _run_in_background(_diagnostics_job)
+            return self._redirect_home()
         elif path == "/settings":
             settings = cfg.setdefault("settings", {})
             try:
@@ -560,6 +603,16 @@ def home_page() -> str:
 </div>""")
 
     stats = state_mod.load_json(STATS, {})
+    diag = state_mod.load_json(DIAGNOSTICS, {})
+    diag_rows = []
+    for c in diag.get("checks", []):
+        diag_rows.append([
+            ("✅" if c.get("ok") else "❌") + " " + esc(c.get("name")),
+            esc(c.get("detail") or ""),
+        ])
+    diag_html = (table(diag_rows, ["الفحص", "النتيجة"])
+                 if diag_rows else
+                 "<p style='color:var(--muted)'>لم يتم الفحص بعد — اضغط زر الفحص لتعرف واش خدام وواش معطّل.</p>")
     stats_rows = []
     for pid, entry in stats.items():
         for dest, info in (entry.get("destinations") or {}).items():
@@ -627,6 +680,8 @@ def home_page() -> str:
 {row_form("/queue", {"url": ""}, "أضف للطابور")}
 {row_form("/queue-process", {"url": ""}, "سحب الآن ⬇", "primary")}
 <form method="post" action="/process"><button class="primary">⬇ سحب ومعالجة الطابور ({len(queue_urls)})</button></form>
+<form method="post" action="/discover"><button class="primary">🔍 اكتشاف منشورات جديدة من المصادر</button></form>
+<p style="color:var(--muted);font-size:13px">الاكتشاف يفتح الصفحات في متصفح مسجّل فيه فيسبوك ويجمع أحدث الريلز — يحتاج إعدادا واحدا: <code>python -m src.discover --login</code></p>
 </div>
 
 <div class="card">
@@ -649,6 +704,12 @@ def home_page() -> str:
 <div class="card">
 <h2>⚙️ الإعدادات</h2>
 {settings_form}
+</div>
+
+<div class="card">
+<h2>🩺 فحص النظام</h2>
+<form method="post" action="/diagnostics"><button>🔍 فحص كل شيء</button></form>
+{diag_html}
 </div>
 
 <div class="card">

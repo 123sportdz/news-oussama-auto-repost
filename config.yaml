@@ -18,6 +18,10 @@ settings:
   publish:
     mode: auto
     windows: []
+  discovery:
+    max_per_source: 5
+    scroll_steps: 4
+    auth_file: state/fb-auth.json
   content_origin: Clips originate from the user's own live broadcasts; source pages
     repost them.
 sources:

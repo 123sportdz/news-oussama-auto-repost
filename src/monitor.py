@@ -273,6 +273,9 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="src.monitor")
     ap.add_argument("--url", action="append", default=[])
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--discover", action="store_true",
+                    help="find new posts from source pages first "
+                    "(needs Playwright + one-time Facebook login)")
     ap.add_argument("--config", default=str(CONFIG_PATH))
     a = ap.parse_args(argv)
 
@@ -283,6 +286,14 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Publish mode: {settings['publish']['mode']} | "
           f"check every {settings['check_every_minutes']} min | "
           f"max {settings['max_posts_per_check']} per check")
+
+    if a.discover:
+        from src.discover import discover_all
+        print("Discovering new posts from source pages …")
+        try:
+            discover_all(cfg)
+        except SystemExit as exc:
+            print(f"Discovery skipped: {exc}")
 
     if a.url:
         QUEUE.parent.mkdir(parents=True, exist_ok=True)
