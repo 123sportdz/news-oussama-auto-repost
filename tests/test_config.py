@@ -17,7 +17,8 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(cfg["settings"]["watermark"]["size_px"], 194)
         self.assertEqual(cfg["settings"]["watermark"]["margin_px"], 30)
         self.assertEqual(cfg["settings"]["caption"]["max_chars"], 1024)
-        self.assertEqual(cfg["settings"]["publish"]["mode"], "draft")
+        # Publish mode was switched to auto on 2026-11-20 (commit 2058f7b).
+        self.assertEqual(cfg["settings"]["publish"]["mode"], "auto")
 
     def test_verified_page_ids(self):
         cfg = load_config(BASE / "config.yaml")
