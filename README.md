@@ -58,9 +58,9 @@ cd news-oussama-repost
 # (وأضفهم للـ PATH)، بعدها:
 git clone <repo-url> news-oussama-repost
 cd news-oussama-repost
-pip install -r requirements.txt
-python monitor.py
+.\setup.bat
 ```
+> ملاحظة: ملفات `.sh` لا تعمل في PowerShell — استعمل `.\setup.bat` و `.\run.bat` على ويندوز، أو افتح Git Bash (يأتي مع git) وشغّل `./setup.sh`.
 
 أو بـ Docker (اختياري):
 ```bash
