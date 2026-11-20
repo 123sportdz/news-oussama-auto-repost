@@ -35,7 +35,7 @@ if command -v facebook-cli >/dev/null 2>&1 || [ -x /opt/hatch/bin/facebook-cli ]
   if "$CLI" pages list --limit 1 2>&1 | grep -q PROFESSIONAL_CONSENT_REQUIRED; then
     echo "  ⚠️  الصفحات: Professional Consent مازال ناقص"
     echo "     النشر عبر API محبوس حتى توافق عليه. البديل: النشر من المتصفح (Chrome تاعك)"
-    echo "     المعالجة (تحميل + شعار + تجهيز) تخدم عادي في وضع draft."
+    echo "     المعالجة (تحميل + شعار + تجهيز) تخدم عادي — النشر يبقى معلّق حتى توافق على Consent."
   else
     echo "  ✅ الصفحات: قائمة الصفحات تتقرا"
   fi
@@ -44,7 +44,7 @@ else
   echo "     البديل: النشر من المتصفح، أو عيّن FB_PAGE_ACCESS_TOKEN في .env"
 fi
 echo ""
-if [ "$fail" = "1" ]; then echo "الفحص فيه نواقص (شوف ❌ فوق)، بصح المعالجة تقدر تكمل في وضع draft."; fi
+if [ "$fail" = "1" ]; then echo "الفحص فيه نواقص (شوف ❌ فوق)، بصح المعالجة (تحميل + شعار + تجهيز) تقدر تكمل عادي."; fi
 
 case "${1:-}" in
   --auto)

@@ -177,6 +177,14 @@ def main(argv: list[str] | None = None) -> None:
             "discovery", {})["max_per_source"] = a.limit
     report = discover_all(cfg)
     total_new = sum(r["new"] for r in report.values())
+    errors = {name: r["error"] for name, r in report.items()
+              if r.get("error")}
+    for name, err in errors.items():
+        print(f"  {name}: خطأ — {err}")
+    if errors and total_new == 0:
+        print("Discovery failed: no source could be read — "
+              "check the errors above.")
+        raise SystemExit(1)
     print(f"Discovery done: {total_new} new post(s) added to the queue.")
 
 

@@ -401,9 +401,13 @@ def main(argv: list[str] | None = None) -> None:
         from src.discover import discover_all
         print("Discovering new posts from source pages …")
         try:
-            discover_all(cfg)
+            report = discover_all(cfg)
         except SystemExit as exc:
             print(f"Discovery skipped: {exc}")
+        else:
+            for name, r in report.items():
+                if r.get("error"):
+                    print(f"  {name}: خطأ — {r['error']}")
 
     if a.url:
         QUEUE.parent.mkdir(parents=True, exist_ok=True)

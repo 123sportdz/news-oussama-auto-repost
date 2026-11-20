@@ -26,7 +26,11 @@ ENGAGEMENT_KEYS = ("like", "comment", "share", "view", "reaction", "play")
 def read_post_raw(url: str, facebook_cli: str = FACEBOOK_CLI) -> dict | None:
     """Raw first post dict from ``facebook-cli post read --url``."""
     cmd = [facebook_cli, "post", "read", "--url", url]
-    result = subprocess.run(cmd, text=True, capture_output=True)
+    try:
+        result = subprocess.run(cmd, text=True, capture_output=True,
+                                timeout=60)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
     try:
         data = json.loads(result.stdout)
     except json.JSONDecodeError:

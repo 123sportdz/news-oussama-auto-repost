@@ -13,8 +13,27 @@ from src.publisher import ConsentMissingError
 
 BASE = Path(__file__).resolve().parent.parent
 
+FIXTURE_PID = "999999999999999"
+FIXTURE_REC = {"post_id": FIXTURE_PID, "caption": "نص تجريبي",
+               "owner": "Test", "created": "",
+               "url": "https://example.invalid/reel/1",
+               "media_type": "video",
+               "watermarked": "/tmp/nope-watermarked.mp4",
+               "publish": [{"destination": "NewsDz9"}]}
+
 
 class DashboardButtonsTest(unittest.TestCase):
+    def setUp(self):
+        # Tests must not depend on the repo's live state: a fresh clone
+        # has an empty ready.json, so create our own fixture post here.
+        self._ready_before = state_mod.load_json(state_mod.READY, {})
+        ready = dict(self._ready_before)
+        ready[FIXTURE_PID] = FIXTURE_REC
+        state_mod.save_json(state_mod.READY, ready)
+
+    def tearDown(self):
+        state_mod.save_json(state_mod.READY, self._ready_before)
+
     def test_home_page_has_download_and_publish_buttons(self):
         page = dashboard.home_page()
         self.assertIn("سحب", page)
@@ -43,7 +62,7 @@ class DashboardButtonsTest(unittest.TestCase):
 
     def test_publish_one_consent_error_leaves_post_queued(self):
         ready = state_mod.load_json(state_mod.READY, {})
-        pid = "807380775688613"
+        pid = FIXTURE_PID
         rec = ready.get(pid)
         self.assertIsNotNone(rec, "test fixture post missing from ready.json")
         cfg = {"settings": {"caption": {"template": "{caption}",
