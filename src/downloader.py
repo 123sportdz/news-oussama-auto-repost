@@ -15,6 +15,13 @@ from pathlib import Path
 FACEBOOK_CLI = "/opt/hatch/bin/facebook-cli"
 
 
+def post_id_from_url(url: str) -> str | None:
+    """The numeric id embedded in a Facebook post/reel URL, if any."""
+    match = re.search(r"/(?:reel/|watch/\?v=|videos/|video\.php\?v=)(\d{6,})",
+                      url)
+    return match.group(1) if match else None
+
+
 def post_info(url: str, facebook_cli: str = FACEBOOK_CLI) -> dict:
     """Read a post/reel URL and return its metadata.
 
@@ -40,6 +47,10 @@ def _post_info_cli(url: str, facebook_cli: str = FACEBOOK_CLI) -> dict:
                                 timeout=60)
     except subprocess.TimeoutExpired:
         raise SystemExit(f"post read timed out for {url}")
+    except (FileNotFoundError, OSError) as exc:
+        # facebook-cli is not installed on this machine (Windows, Docker)
+        # — fall through to the yt-dlp fallback instead of crashing.
+        raise SystemExit(f"facebook-cli not available: {exc}")
     try:
         data = json.loads(result.stdout)
     except json.JSONDecodeError:
@@ -48,8 +59,11 @@ def _post_info_cli(url: str, facebook_cli: str = FACEBOOK_CLI) -> dict:
     if not posts:
         raise SystemExit(f"no post found for {url}: {result.stdout[:500]}")
     p = posts[0]
+    pid = p.get("post_id")
+    if pid is None:
+        raise SystemExit(f"post read returned no post_id for {url}")
     return {
-        "post_id": str(p.get("post_id")),
+        "post_id": str(pid),
         "caption": p.get("post_caption") or "",
         "owner": p.get("owner_name"),
         "created": (p.get("post_created_at") or {}).get("user_local"),
@@ -76,23 +90,28 @@ def video_info(url: str, ytdlp: str = "yt-dlp") -> dict:
                                 timeout=90)
     except subprocess.TimeoutExpired:
         raise SystemExit(f"yt-dlp metadata timed out for {url}")
+    except (FileNotFoundError, OSError) as exc:
+        raise SystemExit(f"yt-dlp not available: {exc}")
     try:
         data = json.loads(result.stdout)
     except json.JSONDecodeError:
         raise SystemExit(f"yt-dlp metadata failed for {url}: "
                          f"{(result.stdout + result.stderr)[:500]}")
-    match = re.search(r"/(?:reel/|watch/\?v=|videos/|video\.php\?v=)(\d{6,})",
-                      url)
-    pid = match.group(1) if match else str(data.get("id"))
+    match = post_id_from_url(url)
+    pid = match if match else data.get("id")
+    if pid is None:
+        raise SystemExit(f"yt-dlp metadata returned no id for {url}")
     caption = (data.get("description") or "").strip() or \
         _clean_title(data.get("title") or "")
+    ext = (data.get("ext") or "").lower()
     return {
-        "post_id": pid,
+        "post_id": str(pid),
         "caption": caption,
         "owner": (data.get("uploader") or "").strip() or None,
         "created": data.get("upload_date"),
         "url": url,
-        "media_type": "video",
+        "media_type": "photo" if ext in ("jpg", "jpeg", "png", "webp")
+                    else "video",
     }
 
 
@@ -106,13 +125,10 @@ def download_video(url: str, out_path: Path | str) -> Path:
                                 timeout=300)
     except subprocess.TimeoutExpired:
         raise SystemExit(f"download timed out for {url}")
+    except (FileNotFoundError, OSError) as exc:
+        raise SystemExit(f"yt-dlp not available: {exc}")
     if result.returncode != 0 or not out_path.exists():
         print(result.stdout[-2000:])
         print(result.stderr[-2000:])
         raise SystemExit(f"download failed for {url}")
     return out_path
-
-
-def download_photo(url: str, out_path: Path | str) -> Path:
-    """Download a photo post (yt-dlp handles image URLs too)."""
-    return download_video(url, out_path)

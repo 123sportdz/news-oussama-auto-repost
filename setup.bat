@@ -7,10 +7,12 @@ cd /d %~dp0
 echo == NEWS OUSSAMA Auto Repost — readiness check ==
 python --version 2>nul || (echo [X] Python 3 is missing — install it from https://www.python.org/downloads/ and tick "Add python to PATH" & exit /b 1)
 where ffmpeg >nul 2>nul || (echo [X] ffmpeg is missing — run: winget install Gyan.FFmpeg & exit /b 1)
-where yt-dlp >nul 2>nul || (echo [i] yt-dlp missing — installing... & pip install yt-dlp)
+where yt-dlp >nul 2>nul || (echo [i] yt-dlp missing — installing... & pip install yt-dlp & where yt-dlp >nul 2>nul || (echo [X] yt-dlp install failed & exit /b 1))
 echo   [OK] Python
 echo   [OK] ffmpeg
 echo   [OK] yt-dlp
+where facebook-cli >nul 2>nul || echo [i] facebook-cli is not installed on this machine — API publishing is unavailable (browser publishing still works; set FB_PAGE_ACCESS_TOKEN in .env for Graph API)
+python -c "import playwright" 2>nul || echo [i] Playwright is not installed — page discovery needs it: pip install playwright ^& python -m playwright install chromium
 if not exist config.yaml (echo [X] config.yaml is missing & exit /b 1)
 if not exist assets\watermark-320.png (echo [X] logo is missing & exit /b 1)
 echo   [OK] config.yaml

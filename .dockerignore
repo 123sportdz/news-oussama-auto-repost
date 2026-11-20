@@ -1,0 +1,10 @@
+# Never bake live state or secrets into the image.
+# state/ holds the Facebook session (fb-auth.json) — a working login.
+# .env holds tokens. .gitignore does NOT protect Docker builds.
+state/
+.env
+.git/
+__pycache__/
+.venv/
+.pytest_cache/
+*.mp4

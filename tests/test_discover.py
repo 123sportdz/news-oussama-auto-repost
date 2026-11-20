@@ -1,5 +1,7 @@
 """Tests for discovery (URL extraction from page HTML) and diagnostics."""
+import sys
 import unittest
+from unittest import mock
 
 from src import diagnostics
 from src.discover import _post_id_from_url, extract_post_urls
@@ -18,7 +20,9 @@ class ExtractUrlsTest(unittest.TestCase):
         self.assertEqual(urls, [
             "https://www.facebook.com/reel/1668308364143510",
             "https://www.facebook.com/reel/980161941419171",
-            "https://www.facebook.com/reel/123456789012345",
+            # /watch/ links keep their form — rewriting them to /reel/
+            # 404s when the video is not a reel
+            "https://www.facebook.com/watch/?v=123456789012345",
         ])
 
     def test_empty_html(self):
@@ -45,10 +49,12 @@ class DiagnosticsTest(unittest.TestCase):
             self.assertIn("detail", c)
 
     def test_playwright_missing_reported_honestly(self):
-        checks = diagnostics.run_checks()
+        # Mock "not installed" instead of asserting about the host:
+        # Playwright IS installed on the user's Windows machine.
+        with mock.patch.dict(sys.modules, {"playwright": None}):
+            checks = diagnostics.run_checks()
         pw = next(c for c in checks
                   if c["name"].startswith("Playwright"))
-        # On this machine Playwright is not installed — the check must say so.
         self.assertFalse(pw["ok"])
         self.assertIn("pip install playwright", pw["detail"])
 

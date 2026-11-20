@@ -47,9 +47,13 @@ def extract_engagement(post: dict) -> dict:
         if isinstance(obj, dict):
             for key, value in obj.items():
                 flat = f"{prefix}{key}".lower()
+                if isinstance(value, bool):
+                    continue
                 if isinstance(value, (int, float)) and any(
                         s in flat for s in ENGAGEMENT_KEYS):
-                    out[key] = value
+                    # first (top-level) value wins — a nested key with
+                    # the same name must not overwrite it
+                    out.setdefault(key, value)
                 elif isinstance(value, (dict, list)):
                     walk(value, f"{prefix}{key}.")
         elif isinstance(obj, list):
@@ -66,9 +70,16 @@ def stats_url(result) -> str | None:
         return None
     if result.get("url"):
         return result["url"]
-    vid = result.get("id") or result.get("video_id") or result.get("post_id")
+    vid = result.get("video_id")
     if vid:
         return f"https://www.facebook.com/reel/{vid}"
+    # a bare post id is only a reel when the result says so (or says
+    # nothing) — a photo post id guessed as a reel URL never resolves
+    media = (result.get("media_type") or result.get("type") or "video")
+    if str(media).lower() in ("video", "reel"):
+        vid = result.get("id") or result.get("post_id")
+        if vid:
+            return f"https://www.facebook.com/reel/{vid}"
     return None
 
 

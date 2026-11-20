@@ -32,8 +32,7 @@ def overlay_expression(position: str = "bottom-right", margin: int = 30) -> str:
 
 def build_filter(size_px: int = 194, margin: int = 30,
                  position: str = "bottom-right",
-                 crop_to_9x16: bool = False,
-                 loudnorm: bool = False) -> str:
+                 crop_to_9x16: bool = False) -> str:
     """Build the -filter_complex string for watermarking a video."""
     parts = []
     if crop_to_9x16:
@@ -47,8 +46,6 @@ def build_filter(size_px: int = 194, margin: int = 30,
         f"{base}[vlogo]overlay={overlay_expression(position, margin)}"
     )
     filt = ",".join(parts) if crop_to_9x16 else parts[-1]
-    if loudnorm:
-        filt += ",loudnorm=I=-16:TP=-1.5:LRA=11"
     return filt
 
 
@@ -58,12 +55,19 @@ def build_ffmpeg_command(inp: Path | str, out: Path | str,
                          crop_to_9x16: bool = False,
                          max_duration_seconds: int = 0,
                          loudnorm: bool = False) -> list[str]:
-    """Build (but do not run) the ffmpeg command for a watermarked video."""
+    """Build (but do not run) the ffmpeg command for a watermarked video.
+
+    loudnorm is an audio-only filter: it goes through ``-af`` on the
+    audio stream, NOT into the video filter chain (appending it there
+    made every video fail at filter-graph setup — verified live).
+    """
     cmd = ["ffmpeg", "-y", "-i", str(inp), "-i", str(LOGO),
            "-filter_complex",
-           build_filter(size_px, margin, position, crop_to_9x16, loudnorm)]
+           build_filter(size_px, margin, position, crop_to_9x16)]
     if max_duration_seconds and max_duration_seconds > 0:
         cmd += ["-t", str(max_duration_seconds)]
+    if loudnorm:
+        cmd += ["-af", "loudnorm=I=-16:TP=-1.5:LRA=11"]
     # veryfast: re-encoding a 3-minute reel on a small VPS must not take
     # 5+ minutes (two concurrent runs once hit the 300s timeout that way)
     cmd += ["-preset", "veryfast", "-movflags", "+faststart", str(out)]
@@ -93,19 +97,17 @@ def watermark_photo(inp: Path | str, out: Path | str, size: int = 320,
     im = Image.open(inp).convert("RGBA")
     w, h = im.size
     s = max(120, min(360, int(w * 0.18)))
+    # tiny image: shrink the logo to fit instead of pasting at a
+    # negative position (alpha_composite raises) — and if the image is
+    # too small for any logo, leave it unchanged
+    s = min(s, max(1, w - 2 * margin), max(1, h - 2 * margin))
+    if s < 20:
+        im.convert("RGB").save(out, quality=92)
+        print(f"photo: {inp} -> {out} ({w}x{h}, too small for a logo)")
+        return Path(out)
     if s != logo.size[0]:
         logo = logo.resize((s, s), Image.LANCZOS)
     im.alpha_composite(logo, (w - s - margin, h - s - margin))
     im.convert("RGB").save(out, quality=92)
     print(f"photo: {inp} -> {out} ({w}x{h}, logo {s}px bottom-right)")
-    return Path(out)
-
-
-def cover_frame(video: Path | str, out: Path | str,
-                seconds: float = 3.0) -> Path:
-    """Extract a still frame (for a thumbnail / cover) from a video."""
-    cmd = ["ffmpeg", "-y", "-ss", str(seconds), "-i", str(video),
-           "-frames:v", "1", str(out)]
-    print("running:", " ".join(cmd))
-    subprocess.run(cmd, check=True, timeout=120)
     return Path(out)

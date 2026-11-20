@@ -12,9 +12,14 @@ from __future__ import annotations
 def build_caption(caption: str, template: str = "{caption}",
                   max_chars: int = 1024,
                   hashtags: list[str] | None = None) -> str:
-    """Build the final caption from the original one."""
+    """Build the final caption from the original one.
+
+    Only ``{caption}`` is a placeholder — any other braces in the
+    template stay literal instead of raising KeyError (the old
+    ``template.format(...)`` crashed the whole run on one bad template).
+    """
     caption = (caption or "").strip()
-    text = template.format(caption=caption).strip()
+    text = (template or "{caption}").replace("{caption}", caption).strip()
     for tag in hashtags or []:
         tag = tag.strip()
         if not tag:
@@ -28,6 +33,7 @@ def build_caption(caption: str, template: str = "{caption}",
 
 def truncate(text: str, max_chars: int) -> str:
     """Truncate to max_chars, ending with '...' instead of mid-word."""
+    max_chars = max(int(max_chars or 1024), 4)
     if len(text) <= max_chars:
         return text
     cut = text[: max_chars - 3].rstrip()

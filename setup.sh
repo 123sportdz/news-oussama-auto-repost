@@ -27,12 +27,12 @@ echo "== فيسبوك =="
 if command -v facebook-cli >/dev/null 2>&1 || [ -x /opt/hatch/bin/facebook-cli ]; then
   CLI="${FACEBOOK_CLI:-/opt/hatch/bin/facebook-cli}"
   command -v facebook-cli >/dev/null 2>&1 && CLI="facebook-cli"
-  if "$CLI" me 2>/dev/null | grep -q Oussama; then
-    echo "  ✅ مربوط: Oussama Tonis"
+  if me_out=$("$CLI" me 2>/dev/null) && [ -n "$me_out" ]; then
+    echo "  ✅ مربوط: $(echo "$me_out" | head -c 120)"
   else
     echo "  ⚠️  facebook-cli موجود بصح الحساب ماشي مربوط — اربطو أولا"
   fi
-  if "$CLI" pages list --limit 1 2>&1 | grep -q PROFESSIONAL_CONSENT_REQUIRED; then
+  if "$CLI" pages list 2>&1 | grep -q PROFESSIONAL_CONSENT_REQUIRED; then
     echo "  ⚠️  الصفحات: Professional Consent مازال ناقص"
     echo "     النشر عبر API محبوس حتى توافق عليه. البديل: النشر من المتصفح (Chrome تاعك)"
     echo "     المعالجة (تحميل + شعار + تجهيز) تخدم عادي — النشر يبقى معلّق حتى توافق على Consent."

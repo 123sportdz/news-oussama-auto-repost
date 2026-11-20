@@ -169,36 +169,52 @@ def _publish_one(cfg: dict, pid: str, dest_name: str,
         return False, f"المنشور منشور من قبل على {dest_name}"
     settings = cfg.get("settings", {})
     cap = settings.get("caption", {})
-    text = build_caption(rec["caption"], cap.get("template", "{caption}"),
-                         int(cap.get("max_chars", 1024)),
-                         cap.get("hashtags") or [])
     try:
-        result = publish(dest, text, rec["watermarked"], token)
-    except ConsentMissingError as exc:
-        return False, (f"⏸ {dest_name}: موافقة Professional Consent ناقصة — "
-                       f"النشر يبقى في الطابور. ({exc})")
-    except PublishError as exc:
-        return False, f"❌ {dest_name}: {exc}"
-    state_mod.mark_published(str(pid), dest_name, result)
+        text = build_caption(rec.get("caption", ""),
+                             cap.get("template", "{caption}"),
+                             int(cap.get("max_chars", 1024)),
+                             cap.get("hashtags") or [])
+    except (ValueError, TypeError) as exc:
+        return False, f"❌ إعداد التسمية غير صالح: {exc}"
+    # The check-publish-mark sequence runs under the lock: two clicks
+    # (or two tabs) must not both see "not published" and both publish.
+    with RunLock() as locked:
+        if not locked:
+            return False, "⏳ عملية أخرى شغالة — جرّب بعد قليل"
+        if state_mod.is_published(str(pid), dest_name):
+            return False, f"المنشور منشور من قبل على {dest_name}"
+        try:
+            result = publish(dest, text, rec["watermarked"], token)
+        except ConsentMissingError as exc:
+            return False, (f"⏸ {dest_name}: موافقة Professional Consent ناقصة — "
+                           f"النشر يبقى في الطابور. ({exc})")
+        except PublishError as exc:
+            return False, f"❌ {dest_name}: {exc}"
+        except (KeyError, FileNotFoundError) as exc:
+            return False, f"❌ {dest_name}: {exc}"
+        state_mod.mark_published(str(pid), dest_name, result)
     return True, f"✅ نُشر على {dest_name}: {result}"
 
 
 def _publish_job(pid: str, dest_name: str | None) -> None:
-    cfg = load_config()
-    token = env("FB_PAGE_ACCESS_TOKEN")
-    if dest_name:
-        ok, msg = _publish_one(cfg, pid, dest_name, token)
-        set_status(msg, ok)
-        return
-    messages = []
-    all_ok = True
-    for dest in cfg.get("destinations", []):
-        if not dest.get("enabled", True):
-            continue
-        ok, msg = _publish_one(cfg, pid, dest["name"], token)
-        messages.append(msg)
-        all_ok = all_ok and ok
-    set_status(" | ".join(messages) or "لا توجد وجهات مفعّلة", all_ok)
+    try:
+        cfg = load_config()
+        token = env("FB_PAGE_ACCESS_TOKEN")
+        if dest_name:
+            ok, msg = _publish_one(cfg, pid, dest_name, token)
+            set_status(msg, ok)
+            return
+        messages = []
+        all_ok = True
+        for dest in cfg.get("destinations", []):
+            if not dest.get("enabled", True):
+                continue
+            ok, msg = _publish_one(cfg, pid, dest["name"], token)
+            messages.append(msg)
+            all_ok = all_ok and ok
+        set_status(" | ".join(messages) or "لا توجد وجهات مفعّلة", all_ok)
+    except Exception as exc:  # noqa: BLE001 — the banner must never stay on "publishing…"
+        set_status(f"❌ خطأ أثناء النشر: {exc}", False)
 
 
 def _process_queue_job() -> None:
@@ -227,10 +243,10 @@ def _process_url_job(url: str) -> None:
                 set_status("⏳ عملية سحب أخرى شغالة — جرّب بعد قليل", False)
                 return
             rec = process_url(url, cfg)
-        ready = refresh_ready(cfg)
-        ready[str(rec["post_id"])] = {**rec,
-                                      "publish": publish_commands(cfg, rec)}
-        state_mod.save_json(READY, ready)
+            ready = refresh_ready(cfg)
+            ready[str(rec["post_id"])] = {**rec,
+                                          "publish": publish_commands(cfg, rec)}
+            state_mod.save_json(READY, ready)
         set_status(f"✅ تم سحب ومعالجة المنشور {rec['post_id']} — جاهز للنشر")
     except Exception as exc:  # noqa: BLE001 — surfaced in the banner
         set_status(f"❌ خطأ أثناء سحب {url}: {exc}", False)
@@ -322,15 +338,42 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _send_file(self, path: Path) -> None:
+        """Stream a file (chunked, with Range support for video seeking)."""
         ctype = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
-        data = path.read_bytes()
-        self.send_response(200)
+        size = path.stat().st_size
+        start, end = 0, size - 1
+        status = 200
+        range_header = self.headers.get("Range")
+        if range_header:
+            m = re.match(r"bytes=(\d*)-(\d*)", range_header.strip())
+            if m:
+                if m.group(1):
+                    start = int(m.group(1))
+                if m.group(2):
+                    end = int(m.group(2))
+                end = min(end, size - 1)
+                if 0 <= start <= end:
+                    status = 206
+        length = end - start + 1
+        self.send_response(status)
         self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Length", str(length))
+        self.send_header("Accept-Ranges", "bytes")
+        if status == 206:
+            self.send_header("Content-Range",
+                             f"bytes {start}-{end}/{size}")
         self.send_header("Content-Disposition",
                          f'inline; filename="{path.name}"')
         self.end_headers()
-        self.wfile.write(data)
+        with open(path, "rb") as fh:
+            fh.seek(start)
+            remaining = length
+            while remaining > 0:
+                chunk = fh.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
 
     def _redirect_home(self) -> None:
         self.send_response(303)
@@ -339,11 +382,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/config.yaml":
-            cfg = load_config()
-            import yaml
-            return self._send(yaml.safe_dump(cfg, allow_unicode=True,
-                                             sort_keys=False),
-                              "text/yaml; charset=utf-8")
+            # serve the user's actual file, not the merged defaults
+            config_file = BASE / "config.yaml"
+            if config_file.is_file():
+                return self._send(config_file.read_text(encoding="utf-8"),
+                                  "text/yaml; charset=utf-8")
+            return self._send("<h1>404</h1>", status=404)
         if self.path == "/status.json":
             queue = ([l for l in QUEUE.read_text().splitlines() if l.strip()]
                      if QUEUE.exists() else [])
@@ -370,32 +414,67 @@ class Handler(BaseHTTPRequestHandler):
         self._send("<h1>404</h1>", status=404)
 
     def do_POST(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        form = urllib.parse.parse_qs(
-            self.rfile.read(length).decode("utf-8"))
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(length).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return self._send("<h1>400 — طلب غير صالح</h1>", status=400)
+        form = urllib.parse.parse_qs(body)
         get = lambda k, d="": (form.get(k) or [d])[0]
+
+        def idx(lst: list) -> int | None:
+            """Validated list index from the form, or None (400)."""
+            raw = get("i")
+            if not raw.isdigit():
+                return None
+            i = int(raw)
+            return i if 0 <= i < len(lst) else None
+
         cfg = load_config()
         path = self.path
         if path == "/add-source":
-            cfg.setdefault("sources", []).append({
-                "url": get("url"), "name": get("name") or get("url"),
-                "enabled": True, "types": ["reel", "video", "post", "photo"]})
+            url = get("url").strip()
+            if url:
+                cfg.setdefault("sources", []).append({
+                    "url": url, "name": get("name").strip() or url,
+                    "enabled": True})
+            else:
+                set_status("رابط المصدر فارغ", False)
         elif path == "/add-destination":
-            cfg.setdefault("destinations", []).append({
-                "url": get("url"), "name": get("name") or get("url"),
-                "page_id": get("page_id") or "", "enabled": True})
+            url = get("url").strip()
+            if url:
+                cfg.setdefault("destinations", []).append({
+                    "url": url, "name": get("name").strip() or url,
+                    "page_id": get("page_id") or "", "enabled": True})
+            else:
+                set_status("رابط الوجهة فارغ", False)
         elif path == "/toggle-source":
-            src = cfg["sources"][int(get("i"))]
+            i = idx(cfg.get("sources", []))
+            if i is None:
+                return self._send("<h1>400 — مصدر غير صالح</h1>", status=400)
+            src = cfg["sources"][i]
             src["enabled"] = not src.get("enabled", True)
         elif path == "/toggle-destination":
-            dst = cfg["destinations"][int(get("i"))]
+            i = idx(cfg.get("destinations", []))
+            if i is None:
+                return self._send("<h1>400 — وجهة غير صالحة</h1>", status=400)
+            dst = cfg["destinations"][i]
             dst["enabled"] = not dst.get("enabled", True)
         elif path == "/delete-source":
-            del cfg["sources"][int(get("i"))]
+            i = idx(cfg.get("sources", []))
+            if i is None:
+                return self._send("<h1>400 — مصدر غير صالح</h1>", status=400)
+            del cfg["sources"][i]
         elif path == "/delete-destination":
-            del cfg["destinations"][int(get("i"))]
+            i = idx(cfg.get("destinations", []))
+            if i is None:
+                return self._send("<h1>400 — وجهة غير صالحة</h1>", status=400)
+            del cfg["destinations"][i]
         elif path == "/set-page-id":
-            cfg["destinations"][int(get("i"))]["page_id"] = get("page_id")
+            i = idx(cfg.get("destinations", []))
+            if i is None:
+                return self._send("<h1>400 — وجهة غير صالحة</h1>", status=400)
+            cfg["destinations"][i]["page_id"] = get("page_id")
         elif path == "/queue":
             url = get("url").strip()
             QUEUE.parent.mkdir(parents=True, exist_ok=True)
@@ -486,8 +565,10 @@ class Handler(BaseHTTPRequestHandler):
             template = get("caption_template").strip()
             if template:
                 settings.setdefault("caption", {})["template"] = template
-            tags = [t.strip() for t in get("hashtags").split(",") if t.strip()]
-            settings.setdefault("caption", {})["hashtags"] = tags
+            if "hashtags" in form:
+                tags = [t.strip() for t in get("hashtags").split(",")
+                        if t.strip()]
+                settings.setdefault("caption", {})["hashtags"] = tags
             mode = get("mode")
             if mode in ("draft", "auto"):
                 settings.setdefault("publish", {})["mode"] = mode
@@ -744,6 +825,14 @@ async function poll() {{
   }} catch (e) {{}}
 }}
 setInterval(poll, 5000);
+// Disable a publish button the moment it is clicked: the server-side
+// busy flag only appears after the next 5s poll, so a fast double-click
+// used to send the same publish twice.
+document.querySelectorAll('form').forEach(function(f) {{
+  f.addEventListener('submit', function() {{
+    f.querySelectorAll('button').forEach(function(b) {{ b.disabled = true; }});
+  }});
+}});
 </script>
 </body></html>"""
 

@@ -31,23 +31,33 @@ sys.path.insert(0, str(BASE))
 
 from src import state as state_mod  # noqa: E402
 from src.config import load_config  # noqa: E402
-from src.monitor import QUEUE  # noqa: E402
+from src.monitor import QUEUE, known_post_ids  # noqa: E402
 
 AUTH_FILE = BASE / "state" / "fb-auth.json"
 
 # /reel/123..., /watch/?v=123..., /video.php?v=123...
-POST_RE = re.compile(r"/(?:reel/|watch/\?v=|videos/|video\.php\?v=)(\d{6,})")
+POST_RE = re.compile(r"/(reel/|watch/\?v=|videos/|video\.php\?v=)(\d{6,})")
 
 
 def extract_post_urls(html: str) -> list[str]:
     """Post/reel URLs found in a Facebook page's HTML, in first-seen order.
 
     Pure function — no browser needed, so it is unit-testable.
+    The original URL form is kept: a /videos/ link stays /videos/,
+    because rewriting it to /reel/ 404s when the video is not a reel.
     """
     seen: dict[str, None] = {}
     for match in POST_RE.finditer(html or ""):
-        pid = match.group(1)
-        seen.setdefault(f"https://www.facebook.com/reel/{pid}", None)
+        prefix, pid = match.group(1), match.group(2)
+        if prefix == "reel/":
+            url = f"https://www.facebook.com/reel/{pid}"
+        elif prefix == "videos/":
+            url = f"https://www.facebook.com/videos/{pid}"
+        elif prefix.startswith("watch/"):
+            url = f"https://www.facebook.com/watch/?v={pid}"
+        else:
+            url = f"https://www.facebook.com/video.php?v={pid}"
+        seen.setdefault(url, None)
     return list(seen)
 
 
@@ -73,10 +83,29 @@ def login(auth_file: Path = AUTH_FILE) -> Path:
                   wait_until="domcontentloaded")
         print("سجّل الدخول إلى فيسبوك في النافذة المفتوحة، ثم اضغط Enter هنا.")
         input()
+        if _looks_logged_out(page):
+            browser.close()
+            raise SystemExit(
+                "يبدو أن تسجيل الدخول لم يتم — أعد المحاولة وتأكد من "
+                "تسجيل الدخول قبل الضغط على Enter.")
         ctx.storage_state(path=str(auth_file))
         browser.close()
     print(f"تم حفظ الجلسة في {auth_file} — لن تحتاج لتسجيل الدخول مجددا.")
     return auth_file
+
+
+def _looks_logged_out(page) -> bool:
+    """True when the browser is showing a Facebook login page."""
+    try:
+        url = page.url or ""
+    except Exception:  # noqa: BLE001 — any unreadable page counts as logged out
+        return True
+    if "login" in url:
+        return True
+    try:
+        return page.locator('input[name="pass"]').count() > 0
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def discover_source(page_url: str, limit: int = 5,
@@ -103,6 +132,11 @@ def discover_source(page_url: str, limit: int = 5,
             except Exception as exc:  # noqa: BLE001 — next tab may work
                 print(f"  ! {tab or 'page'}: {exc}")
                 continue
+            if _looks_logged_out(page):
+                browser.close()
+                raise SystemExit(
+                    "انتهت جلسة فيسبوك — سجّل الدخول مجددا: "
+                    "python -m src.discover --login")
             for _ in range(scroll_steps):
                 for url in extract_post_urls(page.content()):
                     found.setdefault(url, None)
@@ -119,7 +153,7 @@ def discover_source(page_url: str, limit: int = 5,
 
 def _post_id_from_url(url: str) -> str:
     match = POST_RE.search(url)
-    return match.group(1) if match else url
+    return match.group(2) if match else url
 
 
 def discover_all(cfg: dict) -> dict:
@@ -150,8 +184,9 @@ def discover_all(cfg: dict) -> dict:
             report[name] = {"found": 0, "new": 0, "urls": [],
                             "error": str(exc)}
             continue
+        known = known_post_ids(seen)
         fresh = [u for u in urls
-                 if _post_id_from_url(u) not in seen and u not in queued]
+                 if _post_id_from_url(u) not in known and u not in queued]
         new_urls.extend(fresh)
         report[name] = {"found": len(urls), "new": len(fresh), "urls": fresh}
         print(f"  {name}: found {len(urls)}, new {len(fresh)}")

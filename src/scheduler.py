@@ -19,8 +19,13 @@ from src.config import load_config  # noqa: E402
 
 
 def run_once() -> int:
-    return subprocess.run(
-        [sys.executable, "-m", "src.monitor"], cwd=BASE).returncode
+    try:
+        return subprocess.run(
+            [sys.executable, "-m", "src.monitor"], cwd=BASE,
+            timeout=3600).returncode
+    except subprocess.TimeoutExpired:
+        print("monitor run timed out after 1h — skipping this check")
+        return 1
 
 
 def main(argv: list[str] | None = None) -> None:

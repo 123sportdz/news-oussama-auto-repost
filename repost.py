@@ -16,10 +16,6 @@ from src.monitor import process_url  # noqa: E402
 from src.state import load_json, save_json, SEEN  # noqa: E402
 
 
-def process(url):
-    return process_url(url, load_config())
-
-
 def main():
     import argparse
     ap = argparse.ArgumentParser()
@@ -34,7 +30,10 @@ def main():
         ap.error("give --url or --file")
     cfg = load_config()
     for u in urls:
-        process_url(u, cfg)
+        try:
+            process_url(u, cfg)
+        except (Exception, SystemExit) as exc:  # noqa: BLE001
+            print(f"FAILED {u}: {exc}")
     print("\nDone. Seen:", len(load_json(SEEN, {})))
 
 

@@ -32,8 +32,8 @@ sys.path.insert(0, str(BASE))
 from src import state as state_mod  # noqa: E402
 from src.caption import build_caption  # noqa: E402
 from src.config import (CONFIG_PATH, enabled_destinations, enabled_sources,  # noqa: E402
-                        load_config)
-from src.downloader import download_video, post_info  # noqa: E402
+                        load_config, validate_config)
+from src.downloader import download_video, post_id_from_url, post_info  # noqa: E402
 from src.editor import watermark_photo, watermark_video  # noqa: E402
 from src.publisher import ConsentMissingError, PublishError, publish  # noqa: E402
 
@@ -196,6 +196,24 @@ def media_ok(path: Path, is_photo: bool = False) -> bool:
         return False
 
 
+def known_post_ids(seen: dict) -> set[str]:
+    """Every id a seen post is known by.
+
+    The browser /reel/ id and the facebook-cli post id are DIFFERENT
+    numbers for the same reel (seen live 2026-11-20), and the yt-dlp
+    fallback keys by the URL id while the CLI keys by its own fbid.
+    Checking only one namespace re-queues already-processed reels.
+    """
+    ids = set(seen.keys())
+    for rec in seen.values():
+        if isinstance(rec, dict):
+            if rec.get("url_id"):
+                ids.add(str(rec["url_id"]))
+            if rec.get("post_id"):
+                ids.add(str(rec["post_id"]))
+    return ids
+
+
 def process_url(url: str, cfg: dict) -> dict:
     """Process one post URL: read -> download -> edit -> record.
 
@@ -206,20 +224,31 @@ def process_url(url: str, cfg: dict) -> dict:
     """
     info = post_info(url)
     pid = str(info["post_id"])
+    url_id = post_id_from_url(url)
+    wm_settings = cfg["settings"].get("watermark", {})
+    editor = cfg["settings"].get("editor", {})
+    wm_enabled = bool(wm_settings.get("enabled", True))
     is_photo = (info.get("media_type") or "").lower().find("photo") >= 0
-    wm = DL / f"{pid}-watermarked.{'jpg' if is_photo else 'mp4'}"
-    if state_mod.is_seen(pid):
-        seen = state_mod.load_json(state_mod.SEEN, {})
-        if media_ok(wm, is_photo):
-            print(f"SKIP already seen: {pid} ({info['caption'][:60]})")
-            return seen[pid]
-        print(f"seen {pid} but watermarked file is missing/corrupt — "
+    # watermark disabled → the raw file IS the publishable file
+    wm = (DL / f"{pid}.{'jpg' if is_photo else 'mp4'}" if not wm_enabled
+          else DL / f"{pid}-watermarked.{'jpg' if is_photo else 'mp4'}")
+    seen = state_mod.load_json(state_mod.SEEN, {})
+    found_pid = pid if pid in seen else (
+        url_id if url_id and url_id in seen else None)
+    if found_pid is not None:
+        # the files are named by the id the post was first seen under
+        seen_wm = (DL / f"{found_pid}.{'jpg' if is_photo else 'mp4'}"
+                   if not wm_enabled else
+                   DL / f"{found_pid}-watermarked.{'jpg' if is_photo else 'mp4'}")
+        if media_ok(seen_wm, is_photo):
+            print(f"SKIP already seen: {found_pid} "
+                  f"({info['caption'][:60]})")
+            return seen[found_pid]
+        print(f"seen {found_pid} but watermarked file is missing/corrupt — "
               f"re-processing")
 
     print(f"NEW: {pid} | {info['owner']} | {info['created']} | {info['caption']}")
     DL.mkdir(parents=True, exist_ok=True)
-    wm_settings = cfg["settings"].get("watermark", {})
-    editor = cfg["settings"].get("editor", {})
     raw = DL / f"{pid}.{'jpg' if is_photo else 'mp4'}"
     if not media_ok(raw, is_photo):
         download_video(url, raw)
@@ -227,12 +256,18 @@ def process_url(url: str, cfg: dict) -> dict:
     seen = state_mod.load_json(state_mod.SEEN, {})
     dup = find_duplicate_by_hash(seen, content_hash, exclude_pid=pid)
     if dup:
-        print(f"DUPLICATE content of {dup} — skipping re-edit/repost")
-        raw.unlink(missing_ok=True)
-        state_mod.mark_seen(pid, {**info, "content_hash": content_hash,
-                                  "duplicate_of": dup})
-        return seen[dup]
-    if not media_ok(wm, is_photo):
+        dup_rec = seen[dup]
+        dup_wm = Path(dup_rec.get("watermarked") or "")
+        if media_ok(dup_wm, is_photo):
+            print(f"DUPLICATE content of {dup} — skipping re-edit/repost")
+            raw.unlink(missing_ok=True)
+            state_mod.mark_seen(pid, {**info, "content_hash": content_hash,
+                                      "duplicate_of": dup,
+                                      "url_id": url_id})
+            return dup_rec
+        print(f"DUPLICATE content of {dup} but its watermarked file is "
+              f"corrupt — re-editing")
+    if wm_enabled and not media_ok(wm, is_photo):
         if is_photo:
             watermark_photo(raw, wm, size=int(wm_settings.get("size_px", 320)),
                             margin=int(wm_settings.get("margin_px", 30)))
@@ -247,7 +282,7 @@ def process_url(url: str, cfg: dict) -> dict:
                 loudnorm=bool(editor.get("loudnorm", False)),
             )
     record = {**info, "raw": str(raw), "watermarked": str(wm),
-              "content_hash": content_hash}
+              "content_hash": content_hash, "url_id": url_id}
     state_mod.mark_seen(pid, record)
     return record
 
@@ -312,10 +347,45 @@ def process_queue(cfg: dict, urls: list[str], limit: int,
         return _process_queue_locked(cfg, urls, limit, dry_run)
 
 
+MAX_FAILED_ATTEMPTS = 3
+
+
+def load_failed() -> dict[str, dict]:
+    """failed.txt as {url: {error, attempts}} — one line per failure."""
+    out: dict[str, dict] = {}
+    if not FAILED.exists():
+        return out
+    for line in FAILED.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        parts = [p.strip() for p in line.split(" | ")]
+        url = parts[0]
+        attempts = 1
+        error = parts[1] if len(parts) > 1 else ""
+        for part in parts[2:]:
+            if part.startswith("attempts:"):
+                try:
+                    attempts = int(part.split(":", 1)[1])
+                except ValueError:
+                    attempts = 1
+        out[url] = {"error": error, "attempts": attempts}
+    return out
+
+
+def save_failed(failed: dict[str, dict]) -> None:
+    FAILED.parent.mkdir(parents=True, exist_ok=True)
+    lines = [f"{url} | {info.get('error', '')} | "
+             f"attempts:{info.get('attempts', 1)}"
+             for url, info in failed.items()]
+    FAILED.write_text("\n".join(lines) + ("\n" if lines else ""),
+                      encoding="utf-8")
+
+
 def _process_queue_locked(cfg: dict, urls: list[str], limit: int,
                           dry_run: bool = False) -> tuple[list[str],
                                                          list[str]]:
     ready = refresh_ready(cfg)
+    failed = load_failed()
     done, remaining = [], []
     for i, url in enumerate(urls[:limit]):
         if dry_run:
@@ -327,11 +397,20 @@ def _process_queue_locked(cfg: dict, urls: list[str], limit: int,
         except (Exception, SystemExit) as exc:  # noqa: BLE001
             # SystemExit is what process_url raises on download/read
             # failures — it is a BaseException, not an Exception.
-            print(f"FAILED {url}: {exc}")
-            FAILED.parent.mkdir(parents=True, exist_ok=True)
-            with open(FAILED, "a", encoding="utf-8") as fh:
-                fh.write(f"{url} | {exc}\n")
+            attempts = failed.get(url, {}).get("attempts", 0) + 1
+            print(f"FAILED {url}: {exc} (attempt {attempts}/"
+                  f"{MAX_FAILED_ATTEMPTS})")
+            # transient failure (network blip, Facebook hiccup): keep it
+            # for the next run instead of losing it forever; after the
+            # max attempts it stays in failed.txt and is never retried.
+            failed[url] = {"error": str(exc), "attempts": attempts}
+            if attempts >= MAX_FAILED_ATTEMPTS:
+                print(f"  giving up on {url} after {attempts} attempts — "
+                      f"see state/failed.txt")
+            save_failed(failed)
             continue
+        failed.pop(url, None)
+        save_failed(failed)
         rec["publish"] = publish_commands(cfg, rec)
         ready[str(rec["post_id"])] = rec
         done.append(url)
@@ -341,6 +420,20 @@ def _process_queue_locked(cfg: dict, urls: list[str], limit: int,
     remaining += urls[limit:]
     state_mod.save_json(READY, ready)
     return done, remaining
+
+
+def requeue_failed(urls: list[str]) -> list[str]:
+    """Prepend failed URLs with attempts left to the queue (deduped)."""
+    failed = load_failed()
+    retry = [u for u, info in failed.items()
+             if info.get("attempts", 1) < MAX_FAILED_ATTEMPTS
+             and u not in urls]
+    if not retry:
+        return urls
+    for url in retry:
+        failed.pop(url, None)
+    save_failed(failed)
+    return retry + urls
 
 
 def publish_ready(cfg: dict, token: str = "") -> None:
@@ -389,13 +482,20 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--config", default=str(CONFIG_PATH))
     a = ap.parse_args(argv)
 
-    cfg = load_config(a.config)
+    try:
+        cfg = load_config(a.config)
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        print(f"❌ cannot load config {a.config}: {exc}")
+        return
+    for problem in validate_config(cfg):
+        print(f"  ! config: {problem}")
     print(f"Sources enabled: {[s['name'] for s in enabled_sources(cfg)]}")
     print(f"Destinations enabled: {[d['name'] for d in enabled_destinations(cfg)]}")
-    settings = cfg["settings"]
-    print(f"Publish mode: {settings['publish']['mode']} | "
-          f"check every {settings['check_every_minutes']} min | "
-          f"max {settings['max_posts_per_check']} per check")
+    settings = cfg.get("settings") or {}
+    publish = settings.get("publish") or {}
+    print(f"Publish mode: {publish.get('mode', 'draft')} | "
+          f"check every {settings.get('check_every_minutes', 30)} min | "
+          f"max {settings.get('max_posts_per_check', 3)} per check")
 
     if a.discover:
         from src.discover import discover_all
@@ -419,6 +519,9 @@ def main(argv: list[str] | None = None) -> None:
 
     urls = [l.strip() for l in QUEUE.read_text().splitlines()
             if l.strip()] if QUEUE.exists() else []
+    if not a.dry_run:
+        # failed URLs with attempts left get retried, not lost forever
+        urls = requeue_failed(urls)
     refresh_ready(cfg)
     if not urls:
         print("Queue is empty (state/queue.txt). Add a post URL with --url, "
@@ -429,13 +532,13 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     done, remaining = process_queue(cfg, urls,
-                                    int(settings["max_posts_per_check"]),
+                                    int(settings.get("max_posts_per_check", 3)),
                                     dry_run=a.dry_run)
     QUEUE.write_text("\n".join(remaining) + ("\n" if remaining else ""))
     ready = state_mod.load_json(READY, {})
     print(f"\nProcessed {len(done)}, ready in state/ready.json: {len(ready)}, "
           f"remaining in queue: {len(remaining)}")
-    if settings["publish"]["mode"] == "draft":
+    if publish.get("mode") == "draft":
         print("Mode is draft: nothing was published. Review state/ready.json, "
               "then publish each watermarked file.")
     elif not a.dry_run:

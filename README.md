@@ -149,17 +149,22 @@ available" مع أنها عمومية — تم التحقق في 2026-11-20). ل
 
 ```
 ├── config.yaml            # المصادر + الوجهات + الإعدادات (عدّلها براحتك)
-├── setup.sh / run.sh      # تشغيل بأمر واحد
+├── setup.sh / run.sh      # تشغيل بأمر واحد (Linux/macOS)
+├── setup.bat / run.bat / dashboard.bat / discover.bat  # ويندوز
+├── .dockerignore          # state/ والجلسة و.env ما يدخلوش في صورة Docker
 ├── src/
-│   ├── config.py          # تحميل/حفظ/تحقق من config.yaml
-│   ├── downloader.py      # post read + yt-dlp
-│   ├── editor.py          # ffmpeg: شعار، قص 9:16، تقليم، loudnorm، صورة غلاف
+│   ├── config.py          # تحميل/حفظ/تحقق من config.yaml + قراءة .env
+│   ├── downloader.py      # post read + yt-dlp (fallback)
+│   ├── editor.py          # ffmpeg: شعار، قص 9:16، تقليم، loudnorm، صور
 │   ├── caption.py         # قالب النص + هاشتاغ + حد 1024 حرف
 │   ├── publisher.py       # Graph API (token) أو facebook-cli، مع خطأ واضح للـ Consent
-│   ├── state.py           # seen.json + published.json (منع التكرار)
-│   ├── monitor.py         # معالجة الطابور
+│   ├── state.py           # seen.json + published.json (منع التكرار، حفظ ذرّي)
+│   ├── monitor.py         # معالجة الطابور + إعادة محاولة الفاشل (3 مرات)
 │   ├── scheduler.py       # حلقة كل N دقيقة
-│   └── dashboard.py       # لوحة تحكم محلية (stdlib فقط، بلا Flask)
+│   ├── discover.py        # اكتشاف المنشورات من المصادر (Playwright + تسجيل دخول مرة واحدة)
+│   ├── diagnostics.py     # فحص النظام (9 فحوصات)
+│   ├── stats.py           # إحصائيات المنشورات المنشورة
+│   └── dashboard.py       # لوحة تحكم محلية (stdlib فقط، بلا Flask — على 127.0.0.1 فقط، بلا دخول)
 ├── repost.py / monitor.py / watermark.py   # أغلفة رقيقة للتوافق مع الإصدار القديم
 ├── tests/                 # اختبارات unittest — python3 -m unittest discover -s tests -v
 ├── .github/workflows/ci.yml
@@ -213,7 +218,8 @@ python3 -m compileall src tests repost.py monitor.py watermark.py
 
 **Linux / macOS:** `git clone <repo-url> && cd news-oussama-repost && ./setup.sh`
 **Windows:** install Python 3.10+ and ffmpeg, add them to PATH, then
-`pip install -r requirements.txt` and `python monitor.py`.
+`git clone <repo-url>`, `cd news-oussama-repost`, `.\setup.bat`
+(`.\setup.bat --dashboard` for the panel, `.\discover.bat` for discovery).
 **Docker (optional):** `cp .env.example .env && docker compose up --build`
 (dashboard: `docker compose --profile dashboard up`, port 8080).
 

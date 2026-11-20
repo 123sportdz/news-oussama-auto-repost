@@ -24,4 +24,7 @@ services:
       - ./state:/app/state
       - ./assets:/app/assets:ro
     ports:
-      - "8080:8080"
+      # localhost only — the dashboard has NO login: anyone who can
+      # reach it can publish to your Pages and rewrite config.yaml.
+      # Never publish this port to the whole network.
+      - "127.0.0.1:8080:8080"

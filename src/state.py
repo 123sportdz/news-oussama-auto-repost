@@ -8,6 +8,7 @@ so a retry can never duplicate a success.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent.parent
@@ -26,10 +27,19 @@ def load_json(path: Path, default):
 
 
 def save_json(path: Path, data) -> None:
+    """Write JSON atomically: temp file in the same dir + os.replace.
+
+    A plain write_text can be killed mid-write and leave a truncated
+    file; load_json then returns the default {} and seen.json /
+    published.json silently "lose" all history (and posts get
+    re-processed / re-published).
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2),
-                    encoding="utf-8")
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                   encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def is_seen(post_id: str, seen: dict | None = None) -> bool:

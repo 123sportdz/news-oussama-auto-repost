@@ -14,7 +14,6 @@ settings:
     crop_to_9x16: false
     max_duration_seconds: 0
     loudnorm: false
-    cover_frame_seconds: 3.0
   publish:
     mode: auto
     windows: []
@@ -28,19 +27,9 @@ sources:
 - url: https://www.facebook.com/goalalgeria16
   name: Goal Algeria
   enabled: true
-  types:
-  - reel
-  - video
-  - post
-  - photo
 - url: https://www.facebook.com/mohrec1
   name: Moh Rec
   enabled: true
-  types:
-  - reel
-  - video
-  - post
-  - photo
 destinations:
 - url: https://www.facebook.com/NewsDz9
   name: NewsDz9

@@ -135,17 +135,33 @@ class DashboardServerTest(unittest.TestCase):
         data = urllib.parse.urlencode({"url": test_url}).encode()
         req = urllib.request.Request(self._url("/queue"), data=data,
                                      method="POST")
-        try:
-            urllib.request.urlopen(req)
-        except urllib.error.HTTPError as exc:
-            # 303 redirect: urllib follows it; a failure here is real
-            self.assertEqual(exc.code, 303)
+        # urllib follows 303 by default — use a non-redirecting opener
+        # so the redirect itself is asserted, not skipped silently
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers,
+                                 newurl):
+                raise urllib.error.HTTPError(newurl, code, msg, headers, fp)
+        opener = urllib.request.build_opener(NoRedirect)
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            opener.open(req)
+        self.assertEqual(ctx.exception.code, 303)
         try:
             self.assertIn(test_url, queue.read_text())
         finally:
             lines = [l for l in queue.read_text().splitlines()
                      if l.strip() != test_url]
             queue.write_text("\n".join(lines) + ("\n" if lines else ""))
+
+    def test_bad_index_returns_400(self):
+        # i=-1 used to silently target the LAST source; i=999 and i=abc
+        # used to drop the connection with no HTTP response at all.
+        for bad in ("-1", "999", "abc", ""):
+            data = urllib.parse.urlencode({"i": bad}).encode()
+            req = urllib.request.Request(
+                self._url("/toggle-source"), data=data, method="POST")
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(req)
+            self.assertEqual(ctx.exception.code, 400)
 
 
 if __name__ == "__main__":

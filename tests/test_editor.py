@@ -41,8 +41,17 @@ class TestEditor(unittest.TestCase):
         self.assertNotIn("-t", cmd)
 
     def test_loudnorm(self):
-        filt = build_filter(loudnorm=True)
-        self.assertIn("loudnorm", filt)
+        # loudnorm is an audio filter: it must go through -af, never
+        # into the video filter chain.
+        cmd = build_ffmpeg_command("in.mp4", "out.mp4", loudnorm=True)
+        self.assertIn("-af", cmd)
+        self.assertIn("loudnorm=I=-16:TP=-1.5:LRA=11", cmd)
+        filt = build_filter()
+        self.assertNotIn("loudnorm", filt)
+
+    def test_no_loudnorm_by_default(self):
+        cmd = build_ffmpeg_command("in.mp4", "out.mp4")
+        self.assertNotIn("-af", cmd)
 
 
 if __name__ == "__main__":

@@ -14,10 +14,14 @@ class TestState(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.seen = Path(self.tmp.name) / "seen.json"
         self.published = Path(self.tmp.name) / "published.json"
+        self._orig_seen = state_mod.SEEN
+        self._orig_published = state_mod.PUBLISHED
         state_mod.SEEN = self.seen
         state_mod.PUBLISHED = self.published
 
     def tearDown(self):
+        state_mod.SEEN = self._orig_seen
+        state_mod.PUBLISHED = self._orig_published
         self.tmp.cleanup()
 
     def test_seen_roundtrip(self):

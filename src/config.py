@@ -24,13 +24,15 @@ DEFAULTS = {
         "caption": {"template": "{caption}", "max_chars": 1024,
                     "hashtags": []},
         "editor": {"crop_to_9x16": False, "max_duration_seconds": 0,
-                   "loudnorm": False, "cover_frame_seconds": 3.0},
+                   "loudnorm": False},
         "publish": {"mode": "draft"},
     }
 }
 
 
 def _deep_merge(base: dict, over: dict) -> dict:
+    if not isinstance(over, dict):
+        return dict(base)
     out = dict(base)
     for key, value in over.items():
         if isinstance(value, dict) and isinstance(out.get(key), dict):
@@ -43,8 +45,20 @@ def _deep_merge(base: dict, over: dict) -> dict:
 def load_config(path: Path | str = CONFIG_PATH) -> dict:
     """Load config.yaml and fill in any missing settings with defaults."""
     path = Path(path)
-    cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    cfg = _deep_merge(DEFAULTS, cfg)
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(loaded, dict):
+        loaded = {}
+    cfg = _deep_merge(DEFAULTS, loaded)
+    if not isinstance(cfg.get("settings"), dict):
+        cfg["settings"] = dict(DEFAULTS["settings"])
+    if not isinstance(cfg["settings"].get("publish"), dict):
+        cfg["settings"]["publish"] = dict(DEFAULTS["settings"]["publish"])
+    # publish windows must be a list — a single string in YAML would
+    # otherwise be iterated character by character and block all
+    # publishing silently.
+    windows = cfg.get("settings", {}).get("publish", {}).get("windows", [])
+    if isinstance(windows, str):
+        cfg["settings"]["publish"]["windows"] = [windows]
     return cfg
 
 
@@ -83,13 +97,58 @@ def validate_config(cfg: dict) -> list[str]:
                 "publish once via the browser, then post read returns owner_id"
             )
     settings = cfg.get("settings", {})
-    if int(settings.get("check_every_minutes", 30)) < 1:
-        problems.append("check_every_minutes must be >= 1")
-    if int(settings.get("max_posts_per_check", 3)) < 1:
-        problems.append("max_posts_per_check must be >= 1")
+    for key, minimum in (("check_every_minutes", 1),
+                         ("max_posts_per_check", 1)):
+        try:
+            value = int(settings.get(key, minimum))
+        except (TypeError, ValueError):
+            problems.append(f"{key} must be a number >= {minimum}")
+            continue
+        if value < minimum:
+            problems.append(f"{key} must be >= {minimum}")
+    windows = settings.get("publish", {}).get("windows", [])
+    if isinstance(windows, str):
+        problems.append("publish.windows must be a list, not a string")
+    elif not isinstance(windows, list):
+        problems.append("publish.windows must be a list")
+    else:
+        for w in windows:
+            parts = str(w).split("-")
+            if len(parts) != 2 or not all(
+                    len(p) == 5 and p[2] == ":" for p in parts):
+                problems.append(f"publish window {w!r} is not HH:MM-HH:MM")
     return problems
 
 
+_DOTENV_LOADED = False
+
+
+def _load_dotenv() -> None:
+    """Read BASE/.env (KEY=VALUE lines) into os.environ as defaults.
+
+    The README promises a token in .env works — before this, nothing
+    ever read the file, so the Graph API token path was dead on local
+    runs (only Docker's env_file worked).
+    """
+    global _DOTENV_LOADED
+    if _DOTENV_LOADED:
+        return
+    _DOTENV_LOADED = True
+    dotenv = BASE / ".env"
+    if not dotenv.exists():
+        return
+    for line in dotenv.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("\"").strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def env(key: str, default: str = "") -> str:
-    """Read an optional secret from the environment (or .env via shell)."""
+    """Read an optional secret from the environment (or .env)."""
+    _load_dotenv()
     return os.environ.get(key, default)
