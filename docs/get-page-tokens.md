@@ -77,6 +77,11 @@ already picks the right token per destination; the old single
    ```
    (verified live 2026-11-20: the direct call returns the Page
    access token). Copy the `access_token` for each Page into `.env` as above.
+
+   Easiest way: open the dashboard (`.\setup.bat --dashboard`) and
+   paste each token in **🔑 توكنات الصفحات** — it checks the token
+   (type PAGE, `pages_manage_posts`, matching Page id) and writes
+   `.env` for you, no file to download.
 5. **Verify before trusting a token** — for each Page token, check:
    - `tasks` in step 4 includes `CREATE_CONTENT` — without it the
      token cannot publish, and the fix is your Page role, not code.
