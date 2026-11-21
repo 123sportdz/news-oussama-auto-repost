@@ -121,6 +121,23 @@ def validate_config(cfg: dict) -> list[str]:
 
 
 _DOTENV_LOADED = False
+_DOTENV_MTIME_NS: int | None = None
+_DOTENV_KEYS: set[str] = set()
+
+
+def _parse_dotenv(path: Path) -> dict[str, str]:
+    """KEY=VALUE lines from a .env file (comments and blanks skipped)."""
+    values: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("\"").strip("'")
+        if key:
+            values[key] = value
+    return values
 
 
 def _load_dotenv() -> None:
@@ -129,23 +146,45 @@ def _load_dotenv() -> None:
     The README promises a token in .env works — before this, nothing
     ever read the file, so the Graph API token path was dead on local
     runs (only Docker's env_file worked).
+
+    The file is re-read whenever its mtime changes: the dashboard
+    Tokens page writes .env while the server is running, and a token
+    pasted there must be picked up by the next publish without a
+    restart. Keys that came from .env are updated on reload; keys the
+    real environment already had are never overwritten, and keys
+    removed from .env are dropped again.
     """
-    global _DOTENV_LOADED
-    if _DOTENV_LOADED:
+    global _DOTENV_LOADED, _DOTENV_MTIME_NS
+    dotenv = BASE / ".env"
+    try:
+        mtime_ns = dotenv.stat().st_mtime_ns
+    except OSError:
+        mtime_ns = None
+    if _DOTENV_LOADED and mtime_ns == _DOTENV_MTIME_NS:
         return
     _DOTENV_LOADED = True
-    dotenv = BASE / ".env"
-    if not dotenv.exists():
+    _DOTENV_MTIME_NS = mtime_ns
+    if mtime_ns is None:
         return
-    for line in dotenv.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip("\"").strip("'")
-        if key and key not in os.environ:
+    try:
+        values = _parse_dotenv(dotenv)
+    except OSError:
+        return
+    for key in list(_DOTENV_KEYS):
+        if key not in values:
+            os.environ.pop(key, None)
+            _DOTENV_KEYS.discard(key)
+    for key, value in values.items():
+        if key not in os.environ or key in _DOTENV_KEYS:
             os.environ[key] = value
+            _DOTENV_KEYS.add(key)
+
+
+def reload_dotenv() -> None:
+    """Force the next env() call to re-read BASE/.env (after a write)."""
+    global _DOTENV_LOADED
+    _DOTENV_LOADED = False
+    _load_dotenv()
 
 
 def env(key: str, default: str = "") -> str:

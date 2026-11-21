@@ -128,6 +128,20 @@ class DashboardServerTest(unittest.TestCase):
         self.assertIn("busy", data)
         self.assertIn("last_action", data)
 
+    def test_tokens_page_served(self):
+        with urllib.request.urlopen(self._url("/tokens")) as resp:
+            page = resp.read().decode("utf-8")
+        self.assertEqual(resp.status, 200)
+        self.assertIn("توكنات الصفحات", page)
+        self.assertIn("token_147624121772177", page)
+        self.assertIn("token_107469321989814", page)
+
+    def test_home_page_links_tokens_page(self):
+        with urllib.request.urlopen(self._url("/")) as resp:
+            page = resp.read().decode("utf-8")
+        self.assertIn("/tokens", page)
+        self.assertIn("توكنات الصفحات", page)
+
     def test_queue_post_adds_url(self):
         queue = BASE / "state" / "queue.txt"
         before = queue.read_text() if queue.exists() else ""

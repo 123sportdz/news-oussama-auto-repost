@@ -32,10 +32,11 @@ sys.path.insert(0, str(BASE))
 from src import state as state_mod  # noqa: E402
 from src.caption import build_caption  # noqa: E402
 from src.config import (CONFIG_PATH, enabled_destinations, enabled_sources,  # noqa: E402
-                        load_config, validate_config)
+                        env, load_config, validate_config)
 from src.downloader import download_video, post_id_from_url, post_info  # noqa: E402
 from src.editor import watermark_photo, watermark_video  # noqa: E402
-from src.publisher import ConsentMissingError, PublishError, publish  # noqa: E402
+from src.publisher import (ConsentMissingError, PublishError, publish,  # noqa: E402
+                         token_for_destination)
 
 QUEUE = BASE / "state" / "queue.txt"
 READY = BASE / "state" / "ready.json"
@@ -441,6 +442,12 @@ def publish_ready(cfg: dict, token: str = "") -> None:
 
     Each (post_id, destination) is published at most once — see
     state.mark_published. Consent errors leave the post queued.
+
+    The token is resolved PER DESTINATION via token_for_destination
+    (per-page FB_PAGE_ACCESS_TOKEN_<page_id> or the env var in the
+    destination's token_env first, the shared FB_PAGE_ACCESS_TOKEN
+    only as a fallback) — a token for one Page is never sent for
+    another. ``token`` here is only that shared fallback.
     """
     ready = state_mod.load_json(READY, {})
     windows = cfg.get("settings", {}).get("publish", {}).get("windows") or []
@@ -448,6 +455,7 @@ def publish_ready(cfg: dict, token: str = "") -> None:
         print(f"  ⏸ outside publish window; next window starts "
               f"{next_window_start(windows)}")
         return
+    shared = token or env("FB_PAGE_ACCESS_TOKEN")
     for pid, rec in ready.items():
         settings = cfg.get("settings", {})
         cap = settings.get("caption", {})
@@ -461,7 +469,8 @@ def publish_ready(cfg: dict, token: str = "") -> None:
             if state_mod.is_published(pid, name):
                 continue
             try:
-                result = publish(dest, text, rec["watermarked"], token)
+                result = publish(dest, text, rec["watermarked"],
+                                 token_for_destination(dest, shared))
             except ConsentMissingError as exc:
                 print(f"  ⏸ {name}: {exc}")
                 continue
@@ -542,8 +551,7 @@ def main(argv: list[str] | None = None) -> None:
         print("Mode is draft: nothing was published. Review state/ready.json, "
               "then publish each watermarked file.")
     elif not a.dry_run:
-        from src.config import env
-        publish_ready(cfg, token=env("FB_PAGE_ACCESS_TOKEN"))
+        publish_ready(cfg)
 
 
 if __name__ == "__main__":

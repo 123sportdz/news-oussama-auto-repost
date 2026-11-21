@@ -12,6 +12,7 @@ state/last_action.json
 state/stats.json
 state/diagnostics.json
 state/failed.txt
+state/token_status.json
 *.mp4
 *.mov
 
