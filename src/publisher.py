@@ -3,7 +3,11 @@
 Two routes, in order:
 1. Graph API — needs a Page access token (``FB_PAGE_ACCESS_TOKEN``
    in .env). A long-lived Page token is the only way to publish
-   unattended.
+   unattended. Page tokens are PER PAGE: one token never covers two
+   Pages, so ``token_for_destination`` prefers a per-page token
+   (``FB_PAGE_ACCESS_TOKEN_<page_id>`` or the env var named in the
+   destination's ``token_env``) and only falls back to the single
+   shared ``FB_PAGE_ACCESS_TOKEN``.
 2. facebook-cli fallback — ``facebook-cli pages posts create``.
    Each publish asks the user for approval (a card), so it is never
    fully unattended.
@@ -16,11 +20,14 @@ switch into the Page, create a Reel, upload the watermarked file.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+from src.config import env
 
 CONSENT_ERROR = "PROFESSIONAL_CONSENT_REQUIRED"
 
@@ -38,6 +45,27 @@ class ConsentMissingError(RuntimeError):
 
 class PublishError(RuntimeError):
     """Raised when a publish attempt fails for another reason."""
+
+
+def token_for_destination(destination: dict, fallback: str = "") -> str:
+    """Access token for one Page destination.
+
+    Order: (1) the env var named in the destination's ``token_env``
+    (e.g. ``FB_PAGE_TOKEN_NEWSDZ9``); (2) ``FB_PAGE_ACCESS_TOKEN_<page_id>``;
+    (3) the shared ``fallback`` (the single ``FB_PAGE_ACCESS_TOKEN``).
+    Returns "" when nothing is set — the caller then uses facebook-cli.
+    """
+    name = destination.get("token_env")
+    if name:
+        token = env(str(name))
+        if token:
+            return token
+    page_id = destination.get("page_id") or ""
+    if page_id:
+        token = env(f"FB_PAGE_ACCESS_TOKEN_{page_id}")
+        if token:
+            return token
+    return fallback or ""
 
 
 def publish_page_graph(page_id: str, text: str, video_path: Path | str,
@@ -137,6 +165,7 @@ def publish(destination: dict, text: str, video_path: Path | str,
         raise PublishError(
             f"destination {destination.get('name')}: page_id missing — "
             "publish once via the browser, then post read returns owner_id")
-    if token:
-        return publish_page_graph(page_id, text, video_path, token)
+    page_token = token_for_destination(destination, token)
+    if page_token:
+        return publish_page_graph(page_id, text, video_path, page_token)
     return publish_page_cli(page_id, text, video_path)

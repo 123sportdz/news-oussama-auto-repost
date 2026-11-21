@@ -22,10 +22,14 @@
    ويقدر يقصّ للـ 9:16، يقصّر المدة، ويوحّد الصوت (`loudnorm`) — كلها من
    `config.yaml → settings.editor`.
 3. **النشر (Publish):** لكل وجهة على حدة، باش فشل وحدة ما يكرّرش الناجحة.
-   - صفحة: `facebook-cli pages posts create --page-id <id> --text "..." --privacy PUBLIC --file <mp4>`
-     (فيديو واحد MP4 في صفحة = Reel)
+   - صفحة عبر Graph API (الطريقة الأساسية للنشر التلقائي): توكن طويل
+     الأمد خاص بكل صفحة (`FB_PAGE_ACCESS_TOKEN_<page_id>` في `.env`) —
+     عيّنو من لوحة التحكم، قسم **🔑 توكنات الصفحات** (يتحقق من التوكن
+     ويحفظو وحدو، بلا ما تحمّل أي ملف). شوف `docs/get-page-tokens.md`.
    - بروفايل: `facebook-cli post create --message "..." --file <mp4>`
-   - أو عبر Graph API إذا عيّنت `FB_PAGE_ACCESS_TOKEN` في `.env`.
+   - احتياطي للصفحات: `facebook-cli pages posts create --page-id <id> ...`
+     — بصح هاد الطريق يطلب موافقة في كل مرة ويتحبس غالبا بـ Sentinel
+     ("media artifact registration requires an attributable caller").
 4. **منع التكرار (Dedup):** كل `post_id` يتسجّل في `state/seen.json` بعد
    المعالجة، وكل نشر ناجح يتسجّل في `state/published.json` لكل وجهة —
    منشور واحد ما يتنشرش مرتين أبدا.
@@ -36,9 +40,12 @@
   وفشل: `yt-dlp` لقائمة صفحة/ريلز، RSSHub (حجب Cloudflare)، mbasic curl،
   و `facebook-cli pages posts list` (للصفحات المدارة برك). الاكتشاف يكون
   بـ **رابط منشور تلصقو** أو **فحص بالمتصفح** (Chrome تاعك، مسجّل فيه).
-- **النشر عبر API يحتاج Professional Consent.** كل أمر `pages` يرجّع
-  `PROFESSIONAL_CONSENT_REQUIRED` حتى يوافق مدير الصفحة داخل فيسبوك.
-  **النشر من المتصفح يخدم** (مجرّب على الصفحتين — شوف "تجربة حقيقية" تحت).
+- **النشر التلقائي يحتاج توكن لكل صفحة.** النشر بـ `facebook-cli`
+  يرجّع غالبا `PROFESSIONAL_CONSENT_REQUIRED` أو يتوقف بـ Sentinel —
+  ماشي طريق النشر التلقائي. الطريق الصح: توكن Graph API طويل الأمد
+  لكل صفحة (من تطبيق NEWS OUSSAMA الخاص بيك)، يتحط من لوحة التحكم →
+  **🔑 توكنات الصفحات**. **النشر من المتصفح يخدم** (مجرّب على
+  الصفحتين — شوف "تجربة حقيقية" تحت) كبديل يدوي.
 - **النص محدود بـ 1024 حرف** في منشور الصفحة — المشروع يقصّر تلقائيا.
 - **فحص حقوق النشر:** فيسبوك يفحص الفيديو قبل النشر؛ في تجربة NewsDz9 الفحص
   كان مازال جاري وقت النشر، وفي aljazaer07 تعدّى ("Your reel is safe to publish!").
@@ -47,7 +54,7 @@
 
 **Linux / macOS:**
 ```bash
-git clone <repo-url> news-oussama-repost
+git clone https://github.com/123sportdz/news-oussama-auto-repost news-oussama-repost
 cd news-oussama-repost
 ./setup.sh            # يفحص python/ffmpeg/yt-dlp، يثبّت المكتبات، يتحقق من الإعدادات
 ```
@@ -56,10 +63,15 @@ cd news-oussama-repost
 ```powershell
 # ثبّت Python 3.10+ من python.org، و ffmpeg من https://ffmpeg.org/download.html
 # (وأضفهم للـ PATH)، بعدها:
-git clone <repo-url> news-oussama-repost
+git clone https://github.com/123sportdz/news-oussama-auto-repost news-oussama-repost
 cd news-oussama-repost
 .\setup.bat
 ```
+
+بعد التثبيت: شغّل لوحة التحكم (`.\setup.bat --dashboard` على ويندوز،
+`./setup.sh --dashboard` على لينكس)، وافتح قسم **🔑 توكنات الصفحات**
+والصق توكن كل صفحة (الطريقة في `docs/get-page-tokens.md`) — بلا هاد
+الخطوة النشر التلقائي على الصفحات ما يخدمش.
 > ملاحظة: ملفات `.sh` لا تعمل في PowerShell — استعمل `.\setup.bat` و `.\run.bat` على ويندوز، أو افتح Git Bash (يأتي مع git) وشغّل `./setup.sh`.
 
 أو بـ Docker (اختياري):
@@ -88,6 +100,9 @@ docker compose --profile dashboard up  # + لوحة التحكم على :8080
   المعالجة. وتقدر تعدّل نص أي منشور قبل نشره، وتغيّر كل الإعدادات من
   قسم **الإعدادات** (الشعار، الفحص، الوضع، أوقات النشر)، وتشوف
   **إحصائيات** المنشورات (تعليقات/إعجابات...) بزر تحديث الإحصائيات.
+  وقسم **🔑 توكنات الصفحات** يوري حالة توكن كل صفحة (ناقص / محفوظ /
+  صالح / غير صالح) ويخليك تلصق التوكنات — يتحقق منها ويحفظها في
+  `.env` وحدو.
 - **أو يدويا** في `config.yaml`:
 ```yaml
 sources:
@@ -97,7 +112,7 @@ sources:
 destinations:
   - url: https://www.facebook.com/NewsDz9
     name: NewsDz9
-    page_id: '61552757798044'
+    page_id: '147624121772177'
     enabled: true
 settings:
   check_every_minutes: 30
@@ -124,17 +139,21 @@ available" مع أنها عمومية — تم التحقق في 2026-11-20). ل
 
 ### كيفاش تجيب Page ID
 
-الـ ID ما يبانش في واجهة فيسبوك. الطريقة المجرّبة:
-1. انشر أي ريل/منشور على الصفحة من المتصفح (مرة واحدة).
-2. اقرا المنشور: `facebook-cli post read --url <رابط الريل>`
-3. `owner_id` اللي يرجع **هو الـ page_id** — عمّرو في `config.yaml`.
+الـ ID ما يبانش في واجهة فيسبوك. الطريقة الصحيحة (Graph ID):
+1. في Graph API Explorer، نفّذ `GET /NewsDz9` أو `GET /aljazaer07`
+   — الرد فيه الـ `id` الصحيح.
+2. أو من `GET /me/accounts` — كل صفحة فيها `id` + `access_token`.
+> ⚠️ **ما تستعملش `owner_id` تاع ريل منشور.** الـ ID اللي يرجع من
+> `facebook-cli post read` هو الـ profile ID تاع الصفحة، والـ Graph API
+> يرفضو (code 100, subcode 33). الـ Graph ID الصحيح للصفحتين راهو
+> أصلا في `config.yaml` — ما تحتاجش تجيبو من جديد.
 
 ### تجربة حقيقية — 2026-11-20 ✅
 
 | الصفحة | page_id | الريل التجريبي |
 |---|---|---|
-| NewsDz9 — "News Dz (بلادي أنفو)"، 9.9K متابع | `61552757798044` | https://www.facebook.com/reel/1169537658859941 |
-| aljazaer07 — "الجزائر سبعة"، 37K متابع | `100083258325099` | https://www.facebook.com/reel/980161941419171 |
+| NewsDz9 — "News Dz (بلادي أنفو)"، 9.9K متابع | `147624121772177` | https://www.facebook.com/reel/1169537658859941 |
+| aljazaer07 — "الجزائر سبعة"، 37K متابع | `107469321989814` | https://www.facebook.com/reel/980161941419171 |
 
 - المقطع الأصلي: Goal Algeria، ريل https://facebook.com/reel/1668308364143510/
   ("ثنائية مازة و حاج موسى 🎩🪄"، 7 ثواني، 720×1280).
@@ -157,7 +176,8 @@ available" مع أنها عمومية — تم التحقق في 2026-11-20). ل
 │   ├── downloader.py      # post read + yt-dlp (fallback)
 │   ├── editor.py          # ffmpeg: شعار، قص 9:16، تقليم، loudnorm، صور
 │   ├── caption.py         # قالب النص + هاشتاغ + حد 1024 حرف
-│   ├── publisher.py       # Graph API (token) أو facebook-cli، مع خطأ واضح للـ Consent
+│   ├── publisher.py       # Graph API (توكن لكل صفحة) أو facebook-cli، مع خطأ واضح للـ Consent
+│   ├── tokens.py          # إعداد التوكنات: تحقق من Graph API + كتابة .env (لوحة التحكم)
 │   ├── state.py           # seen.json + published.json (منع التكرار، حفظ ذرّي)
 │   ├── monitor.py         # معالجة الطابور + إعادة محاولة الفاشل (3 مرات)
 │   ├── scheduler.py       # حلقة كل N دقيقة
@@ -192,9 +212,14 @@ python3 -m compileall src tests repost.py monitor.py watermark.py
    margin), optionally crops to 9:16, trims duration and normalises audio
    (`loudnorm`) — all from `config.yaml → settings.editor`.
 3. **Publish:** one destination at a time, so one failure never duplicates a
-   success. Page: `facebook-cli pages posts create` (one MP4 = a Reel);
-   profile: `facebook-cli post create`; or Graph API with
-   `FB_PAGE_ACCESS_TOKEN` in `.env`.
+   success. Page via the Graph API (the unattended route): a long-lived
+   token per Page (`FB_PAGE_ACCESS_TOKEN_<page_id>` in `.env`) — set it
+   from the dashboard, **🔑 Page tokens** section (it validates the token
+   and saves it, no file download needed). See `docs/get-page-tokens.md`.
+   Profile: `facebook-cli post create`; Pages fallback:
+   `facebook-cli pages posts create` — but that route asks approval every
+   time and usually stalls on Sentinel ("media artifact registration
+   requires an attributable caller").
 4. **Dedup:** every `post_id` is recorded in `state/seen.json`, every
    successful publish per destination in `state/published.json` — a post is
    never reposted twice.
@@ -206,9 +231,12 @@ python3 -m compileall src tests repost.py monitor.py watermark.py
   (Cloudflare block), mbasic curl, `facebook-cli pages posts list`
   (managed pages only). Discovery = **paste a post URL** or a **browser
   check** in your own logged-in Chrome.
-- **Page API publishing needs Professional Consent.** Every `pages` command
-  returns `PROFESSIONAL_CONSENT_REQUIRED` until the Page admin approves it
-  inside Facebook. **Browser publishing works** (verified on both pages).
+- **Unattended publishing needs one token per Page.** Publishing with
+  `facebook-cli` usually returns `PROFESSIONAL_CONSENT_REQUIRED` or
+  stalls on Sentinel — it is not the unattended route. The working
+  route is a long-lived Graph API token per Page (from your own NEWS
+  OUSSAMA app), pasted in the dashboard → **🔑 Page tokens**.
+  **Browser publishing works** (verified on both pages).
 - **Page post captions are limited to 1024 chars** — truncated automatically.
 - **Copyright check:** Facebook scans the video before publishing; on NewsDz9
   the check was still running at publish time, on aljazaer07 it passed
@@ -216,10 +244,13 @@ python3 -m compileall src tests repost.py monitor.py watermark.py
 
 ### Install
 
-**Linux / macOS:** `git clone <repo-url> && cd news-oussama-repost && ./setup.sh`
+**Linux / macOS:** `git clone https://github.com/123sportdz/news-oussama-auto-repost news-oussama-repost && cd news-oussama-repost && ./setup.sh`
 **Windows:** install Python 3.10+ and ffmpeg, add them to PATH, then
-`git clone <repo-url>`, `cd news-oussama-repost`, `.\setup.bat`
+`git clone https://github.com/123sportdz/news-oussama-auto-repost news-oussama-repost`, `cd news-oussama-repost`, `.\setup.bat`
 (`.\setup.bat --dashboard` for the panel, `.\discover.bat` for discovery).
+Then open the dashboard and paste each Page token in **🔑 Page tokens**
+(how-to in `docs/get-page-tokens.md`) — without this step, automatic
+publishing to the Pages does not work.
 **Docker (optional):** `cp .env.example .env && docker compose up --build`
 (dashboard: `docker compose --profile dashboard up`, port 8080).
 
@@ -240,17 +271,20 @@ directly (same shape as the Arabic example above).
 
 ### How to get a Page ID
 
-The ID is not shown in the Facebook UI. Proven method:
-1. Publish any reel/post on the Page once, from the browser.
-2. Read it: `facebook-cli post read --url <reel url>`
-3. The returned `owner_id` **is the page_id** — put it in `config.yaml`.
+The ID is not shown in the Facebook UI. Correct way (Graph ID):
+1. In the Graph API Explorer, run `GET /NewsDz9` or `GET /aljazaer07` —
+   the response has the correct `id`.
+2. Or `GET /me/accounts` — each Page has `id` + `access_token`.
+> ⚠️ **Do NOT use a published reel's `owner_id`.** That is the Page's
+> *profile* ID, which the Graph API rejects (code 100, subcode 33).
+> The correct Graph IDs for both Pages are already in `config.yaml`.
 
 ### Verified test reels — 2026-11-20 ✅
 
 | Page | page_id | Test reel |
 |---|---|---|
-| NewsDz9 — "News Dz (بلادي أنفو)", 9.9K followers | `61552757798044` | https://www.facebook.com/reel/1169537658859941 |
-| aljazaer07 — "الجزائر سبعة", 37K followers | `100083258325099` | https://www.facebook.com/reel/980161941419171 |
+| NewsDz9 — "News Dz (بلادي أنفو)", 9.9K followers | `147624121772177` | https://www.facebook.com/reel/1169537658859941 |
+| aljazaer07 — "الجزائر سبعة", 37K followers | `107469321989814` | https://www.facebook.com/reel/980161941419171 |
 
 Original clip: Goal Algeria reel https://facebook.com/reel/1668308364143510/
 ("ثنائية مازة و حاج موسى 🎩🪄", 7s, 720×1280). yt-dlp download + ffmpeg

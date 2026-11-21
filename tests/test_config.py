@@ -23,8 +23,8 @@ class TestConfig(unittest.TestCase):
     def test_verified_page_ids(self):
         cfg = load_config(BASE / "config.yaml")
         dests = {d["name"]: d for d in cfg["destinations"]}
-        self.assertEqual(dests["NewsDz9"]["page_id"], "61552757798044")
-        self.assertEqual(dests["aljazaer07"]["page_id"], "100083258325099")
+        self.assertEqual(dests["NewsDz9"]["page_id"], "147624121772177")
+        self.assertEqual(dests["aljazaer07"]["page_id"], "107469321989814")
 
     def test_sources_are_the_two_known_pages(self):
         cfg = load_config(BASE / "config.yaml")

@@ -41,7 +41,8 @@ if command -v facebook-cli >/dev/null 2>&1 || [ -x /opt/hatch/bin/facebook-cli ]
   fi
 else
   echo "  ⚠️  facebook-cli ماشي مثبّت على هاد الجهاز — النشر عبر API غير متاح"
-  echo "     البديل: النشر من المتصفح، أو عيّن FB_PAGE_ACCESS_TOKEN في .env"
+  echo "     البديل: النشر من المتصفح، أو عيّن توكن كل صفحة في .env"
+  echo "     (الأسهل: لوحة التحكم ← 🔑 توكنات الصفحات — الصق التوكن ويتحفظ وحدو)"
 fi
 echo ""
 if [ "$fail" = "1" ]; then echo "الفحص فيه نواقص (شوف ❌ فوق)، بصح المعالجة (تحميل + شعار + تجهيز) تقدر تكمل عادي."; fi

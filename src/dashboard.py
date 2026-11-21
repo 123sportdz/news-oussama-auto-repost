@@ -13,6 +13,9 @@ Features:
   real "نشر" button per destination (or "نشر للكل"). Publishing runs
   in the background; the result appears in the status banner.
 - See seen + published history.
+- Set up Page tokens (🔑 توكنات الصفحات): paste each Page token, it is
+  validated against the Graph API and written to the local .env —
+  no file download needed, and tokens are never shown in full.
 - Download the generated config.yaml.
 """
 from __future__ import annotations
@@ -32,6 +35,7 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 
+from src import tokens as tokens_mod  # noqa: E402
 from src.caption import build_caption  # noqa: E402
 from src.config import env, load_config, save_config  # noqa: E402
 from src import state as state_mod  # noqa: E402
@@ -40,7 +44,8 @@ from src.discover import discover_all  # noqa: E402
 from src.monitor import (DL, QUEUE, READY, RunLock, _parse_window,  # noqa: E402
                          in_publish_window, next_window_start, process_queue,
                          process_url, publish_commands, refresh_ready)
-from src.publisher import ConsentMissingError, PublishError, publish  # noqa: E402
+from src.publisher import (ConsentMissingError, PublishError, publish,  # noqa: E402
+                         token_for_destination)
 from src.stats import STATS, refresh_stats  # noqa: E402
 
 STATUS = BASE / "state" / "last_action.json"
@@ -100,6 +105,7 @@ padding:2px 6px;border-radius:6px}
 font-weight:700;background:#26272e}
 .badge.ok{background:#052e16;color:var(--green)}
 .badge.warn{background:#451a03;color:#fbbf24}
+.badge.bad{background:#450a0a;color:#ef4444}
 .status{padding:12px 16px;border-radius:10px;margin-bottom:18px;
 border:1px solid var(--gold);background:#1a1503}
 .status.ok{border-color:var(--green);background:#04160a}
@@ -121,6 +127,112 @@ footer{color:var(--muted);font-size:12px;text-align:center;margin-top:24px}
 
 def esc(value) -> str:
     return html.escape(str(value if value is not None else ""))
+
+
+_TOKEN_BADGES = {
+    "ok": '<span class="badge ok">✅ صالح</span>',
+    "configured": '<span class="badge warn">⚠️ محفوظ — ما تتحققش بعد</span>',
+    "invalid": '<span class="badge bad">❌ غير صالح</span>',
+    "missing": '<span class="badge">⭕ ناقص</span>',
+}
+
+
+def _save_tokens(cfg: dict, form: dict) -> tuple[list[str], bool]:
+    """Validate pasted Page tokens and save the valid ones to .env.
+
+    Returns (messages, all_ok). A token that fails validation is
+    NEVER written to .env — the old (or missing) token stays as-is.
+    """
+    get = lambda k: (form.get(k) or [""])[0]  # noqa: E731
+    stored = tokens_mod.load_token_status()
+    messages: list[str] = []
+    all_ok = True
+    for row in tokens_mod.destination_token_status(cfg):
+        raw = get(f"token_{row['page_id']}").strip()
+        if not raw:
+            continue
+        result = tokens_mod.validate_token(raw, row["page_id"])
+        stored[row["page_id"]] = {
+            **result,
+            "token_fingerprint": tokens_mod.token_fingerprint(raw),
+            "checked_at": tokens_mod.now_iso(),
+        }
+        if result["ok"]:
+            tokens_mod.write_env_tokens({row["env_key"]: raw})
+            messages.append(
+                f"✅ {row['name']}: توكن صالح — الصفحة «{result['page_name']}»"
+                f" — تحفظ في .env")
+        else:
+            all_ok = False
+            messages.append(f"❌ {row['name']}: {result['error']} — ما تحفظش")
+    tokens_mod.save_token_status(stored)
+    if not messages:
+        messages.append("ما الصقت حتى توكن — الصق التوكن في الخانة واضغط حفظ")
+        all_ok = False
+    return messages, all_ok
+
+
+def tokens_page(message: str = "", ok: bool = True) -> str:
+    """🔑 توكنات الصفحات — paste, validate, save to .env.
+
+    This is the fix for the .env delivery problem: the file download
+    kept failing, so the tokens are pasted here instead. Full token
+    values are never rendered — only the masked form.
+    """
+    cfg = load_config()
+    rows = tokens_mod.destination_token_status(cfg)
+    status_html = ""
+    if message:
+        cls = "status ok" if ok else "status bad"
+        status_html = (f'<div class="{cls}">{esc(message)}</div>')
+    cards = []
+    for row in rows:
+        detail = ""
+        if row["status"] == "ok":
+            detail = (f'الصفحة: {esc(row["page_name"] or "؟")}'
+                      f' • تحقق {esc(row["checked_at"])}')
+        elif row["status"] == "invalid" and row["error"]:
+            detail = (f'{esc(row["error"])}'
+                      f' • تحقق {esc(row["checked_at"])}')
+        elif row["status"] == "configured":
+            detail = "محفوظ في .env — الصقو من جديد باش يتحقق منو"
+        remove_btn = ""
+        if row["present"]:
+            remove_btn = (
+                f'<form method="post" action="/tokens-remove">'
+                f'<input type="hidden" name="page_id" value="{esc(row["page_id"])}">'
+                f'<button class="danger">🗑 حذف التوكن</button></form>')
+        cards.append(f"""
+<div class="card">
+<h2>{esc(row["name"])} <span class="count">page_id {esc(row["page_id"])}</span></h2>
+<p>{_TOKEN_BADGES[row["status"]]} {f"<code>{esc(row['masked'])}</code>" if row["masked"] else ""}</p>
+{f"<p style='color:var(--muted);font-size:13px'>{detail}</p>" if detail else ""}
+<form method="post" action="/tokens">
+<input type="password" name="token_{esc(row["page_id"])}" placeholder="الصق توكن الصفحة هنا" style="width:70%" autocomplete="off">
+<button class="primary">💾 حفظ وتحقق</button>
+</form>
+{remove_btn}
+</div>""")
+    return f"""<!DOCTYPE html><html lang="ar"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEWS OUSSAMA — توكنات الصفحات</title><style>{CSS}</style></head><body>
+<div class="wrap">
+<header>
+<img class="logo" src="/logo" alt="NEWS OUSSAMA">
+<div><h1>🔑 توكنات الصفحات</h1><p>النشر التلقائي عبر Graph API يحتاج توكن طويل الأمد لكل صفحة</p></div>
+</header>
+{status_html}
+<p><a href="/">← رجوع للوحة التحكم</a></p>
+<div class="card">
+<h2>منين نجيب التوكن؟</h2>
+<p>الطريقة الكاملة في <a href="https://github.com/123sportdz/news-oussama-auto-repost/blob/main/docs/get-page-tokens.md">docs/get-page-tokens.md</a> — باختصار: من تطبيق NEWS OUSSAMA (App ID 4770375176523569) جيب User Token من Graph API Explorer، بدّلو لطويل الأمد، وجيب توكن كل صفحة من <code>/me/accounts</code> (NewsDz9) أو من عقدة الصفحة مباشرة (الجزائر سبعة). الصق كل توكن في خانته هنا — يتحقق منو (نوع PAGE، صلاحية <code>pages_manage_posts</code>، والـ id يطابق الصفحة) ويتحفظ وحدو في ملف <code>.env</code> المحلي.</p>
+<p style="color:var(--muted);font-size:13px">التوكن ما يتبعتش لأي جهة غير graph.facebook.com للتحقق، وما يبانش كامل أبدا — غير أول 4 وآخر 4 حروف. <code>.env</code> ما يدخلش في Git.</p>
+</div>
+{"".join(cards)}
+<p style="color:var(--muted)">البروفايل ينشر عبر facebook-cli — ما يحتاجش توكن.</p>
+<footer>NEWS OUSSAMA • إعادة النشر التلقائية</footer>
+</div>
+</body></html>"""
 
 
 def row_form(action: str, fields: dict, label: str,
@@ -150,7 +262,14 @@ def get_status() -> dict:
 
 def _publish_one(cfg: dict, pid: str, dest_name: str,
                  token: str = "") -> tuple[bool, str]:
-    """Publish one ready post to one destination. Returns (ok, message)."""
+    """Publish one ready post to one destination. Returns (ok, message).
+
+    The token is resolved PER DESTINATION via
+    publisher.token_for_destination (per-page
+    FB_PAGE_ACCESS_TOKEN_<page_id> or the env var in the destination's
+    token_env first, the shared FB_PAGE_ACCESS_TOKEN only as a
+    fallback). A token for NewsDz9 must never be sent for aljazaer07.
+    """
     windows = cfg.get("settings", {}).get("publish", {}).get("windows") or []
     if not in_publish_window(windows):
         return False, (f"⏸ خارج أوقات النشر — النافذة القادمة "
@@ -167,6 +286,8 @@ def _publish_one(cfg: dict, pid: str, dest_name: str,
         return False, f"الوجهة {dest_name} معطّلة"
     if state_mod.is_published(str(pid), dest_name):
         return False, f"المنشور منشور من قبل على {dest_name}"
+    page_token = token_for_destination(
+        dest, token or env("FB_PAGE_ACCESS_TOKEN"))
     settings = cfg.get("settings", {})
     cap = settings.get("caption", {})
     try:
@@ -184,7 +305,7 @@ def _publish_one(cfg: dict, pid: str, dest_name: str,
         if state_mod.is_published(str(pid), dest_name):
             return False, f"المنشور منشور من قبل على {dest_name}"
         try:
-            result = publish(dest, text, rec["watermarked"], token)
+            result = publish(dest, text, rec["watermarked"], page_token)
         except ConsentMissingError as exc:
             return False, (f"⏸ {dest_name}: موافقة Professional Consent ناقصة — "
                            f"النشر يبقى في الطابور. ({exc})")
@@ -199,9 +320,10 @@ def _publish_one(cfg: dict, pid: str, dest_name: str,
 def _publish_job(pid: str, dest_name: str | None) -> None:
     try:
         cfg = load_config()
-        token = env("FB_PAGE_ACCESS_TOKEN")
+        # No shared-token pre-read here: _publish_one resolves the token
+        # per destination (see its docstring).
         if dest_name:
-            ok, msg = _publish_one(cfg, pid, dest_name, token)
+            ok, msg = _publish_one(cfg, pid, dest_name)
             set_status(msg, ok)
             return
         messages = []
@@ -209,7 +331,7 @@ def _publish_job(pid: str, dest_name: str | None) -> None:
         for dest in cfg.get("destinations", []):
             if not dest.get("enabled", True):
                 continue
-            ok, msg = _publish_one(cfg, pid, dest["name"], token)
+            ok, msg = _publish_one(cfg, pid, dest["name"])
             messages.append(msg)
             all_ok = all_ok and ok
         set_status(" | ".join(messages) or "لا توجد وجهات مفعّلة", all_ok)
@@ -411,6 +533,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_file(found)
         if self.path in ("/", ""):
             return self._send(home_page())
+        if self.path == "/tokens":
+            return self._send(tokens_page())
         self._send("<h1>404</h1>", status=404)
 
     def do_POST(self):
@@ -544,6 +668,20 @@ class Handler(BaseHTTPRequestHandler):
             set_status("⏳ جارٍ فحص النظام …")
             _run_in_background(_diagnostics_job)
             return self._redirect_home()
+        elif path == "/tokens":
+            messages, all_ok = _save_tokens(cfg, form)
+            return self._send(tokens_page(" | ".join(messages), all_ok))
+        elif path == "/tokens-remove":
+            page_id = get("page_id").strip()
+            if page_id:
+                tokens_mod.write_env_tokens(
+                    {}, remove=(tokens_mod.env_key_for_page(page_id),))
+                stored = tokens_mod.load_token_status()
+                stored.pop(page_id, None)
+                tokens_mod.save_token_status(stored)
+                return self._send(
+                    tokens_page(f"🗑 حُذف توكن الصفحة {page_id} من .env", True))
+            return self._send(tokens_page("page_id ناقص", False))
         elif path == "/settings":
             settings = cfg.setdefault("settings", {})
             try:
@@ -739,6 +877,21 @@ def home_page() -> str:
 
     mode = (settings.get("publish", {}) or {}).get("mode", "draft")
     mode_badge = (f'<span class="mode-badge">{"🚀 تلقائي" if mode == "auto" else "📝 مسودة"}</span>')
+    token_rows = []
+    for row in tokens_mod.destination_token_status(cfg):
+        token_rows.append([
+            esc(row["name"]), esc(row["page_id"]),
+            _TOKEN_BADGES[row["status"]],
+            esc(row["masked"]) if row["masked"] else "—",
+            esc(row["page_name"]) if row["page_name"] else "—",
+        ])
+    token_card = f"""
+<div class="card">
+<h2>🔑 توكنات الصفحات</h2>
+{table(token_rows, ["الصفحة", "page_id", "الحالة", "التوكن", "اسم الصفحة"])}
+<p style="color:var(--muted);font-size:13px">البروفايل ينشر عبر facebook-cli — ما يحتاجش توكن. التوكنات تتحفظ برك في ملف .env المحلي، وما تبانش كاملة أبدا.</p>
+<p><a href="/tokens">🔑 إعداد التوكنات</a> — الصق توكن كل صفحة، يتحقق منو ويتحفظ وحدو.</p>
+</div>"""
     stats_cards = f"""
 <div class="stats">
 <div class="stat"><div class="num">{len(queue_urls)}</div><div class="lbl">في الطابور</div></div>
@@ -761,6 +914,7 @@ def home_page() -> str:
 </header>
 {status_html}
 {stats_cards}
+{token_card}
 
 <div class="card">
 <h2>📥 أضف منشور للطابور</h2>

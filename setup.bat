@@ -11,7 +11,7 @@ where yt-dlp >nul 2>nul || (echo [i] yt-dlp missing — installing... & pip inst
 echo   [OK] Python
 echo   [OK] ffmpeg
 echo   [OK] yt-dlp
-where facebook-cli >nul 2>nul || echo [i] facebook-cli is not installed on this machine — API publishing is unavailable (browser publishing still works; set FB_PAGE_ACCESS_TOKEN in .env for Graph API)
+where facebook-cli >nul 2>nul || echo [i] facebook-cli is not installed on this machine — API publishing is unavailable (browser publishing still works; set one token per Page in .env for Graph API — easiest: dashboard, Page tokens section)
 python -c "import playwright" 2>nul || echo [i] Playwright is not installed — page discovery needs it: pip install playwright ^& python -m playwright install chromium
 if not exist config.yaml (echo [X] config.yaml is missing & exit /b 1)
 if not exist assets\watermark-320.png (echo [X] logo is missing & exit /b 1)
