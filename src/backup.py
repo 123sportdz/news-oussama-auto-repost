@@ -56,6 +56,12 @@ def backup_state(now: datetime | None = None,
                 continue
             if any(path.name.endswith(s) for s in _SKIP_SUFFIXES):
                 continue
+            # The videos themselves are NOT backed up: they can be
+            # re-downloaded, and including them made one backup 460 MB
+            # (2026-11-22). What must never be lost is the history —
+            # seen/published/ready/queue/failed — which is kilobytes.
+            if "downloads" in path.relative_to(STATE_DIR).parts:
+                continue
             zf.write(path, path.relative_to(STATE_DIR))
     for old in list_backups()[: -keep] if keep > 0 else []:
         old.unlink(missing_ok=True)

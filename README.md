@@ -169,6 +169,27 @@ Telegram. أنشئ بوت من `@BotFather` (`/newbot`)، وجيب معرّف ا
 (حقل "أقصر مدة للكليب" في الإعدادات) أو من `config.yaml`:
 `editor.min_duration_seconds` — القيمة 0 تعني الكل مقبول.
 
+### تنظيف ملفات التحميل 🧹
+
+`state/downloads/` كان يكبر بلا توقف (441 MB في 22-11-2026). كل فحص
+يحذف ملفات المنشورات المنشورة في كل الوجهات والأقدم من
+`settings.cleanup.keep_days` (الافتراضي 30 يوم، 0 = ما يتحذف والو).
+المنشورات الجاهزة والملفات المجهولة ما تتمسش أبدا. زر "🧹 تنظيف
+الملفات القديمة" في الداشبورد يدير نفس الشيء يدويا، أو:
+`python -m src.cleanup --dry-run`
+
+### كلمة سر للداشبورد 🔐
+
+الداشبورد بلا كلمة سر يثق في `localhost` برك. إذا بغيت تفتحو من برا
+(مثلا عبر نفق للهاتف)، حط `DASHBOARD_PASSWORD=` في `.env` — بعدها
+المتصفح يطلب كلمة السر قبل ما يفتح أي صفحة.
+
+### فحص جلسة فيسبوك
+
+صفحة التشخيص في الداشبورد تبين عمر جلسة الاكتشاف (`state/fb-auth.json`)
+— إذا فاتت 60 يوم تنبهك أنها قديمة، وإذا الاكتشاف لقى 0 منشورات سجّل
+الدخول مجددا: `python -m src.discover --login`
+
 ### قراءة المنشورات: بديل تلقائي
 
 `facebook-cli post read` ما يشوفش المنشورات الجداد (يرجع "post not
@@ -355,6 +376,16 @@ duplicate video. Only use this on content you have the right to repost.
   `facebook-cli` for the profile.
 - **Quality filter:** clips shorter than `editor.min_duration_seconds`
   are skipped (0 = off), settable in the dashboard settings.
+- **Download retention:** every run deletes download files of posts
+  published everywhere and older than `settings.cleanup.keep_days`
+  (default 30, 0 = never). Ready posts and unknown files are never
+  touched. Manual run from the dashboard ("🧹 تنظيف الملفات القديمة")
+  or `python -m src.cleanup --dry-run`.
+- **Dashboard password:** set `DASHBOARD_PASSWORD` in `.env` before
+  exposing the port (e.g. via a tunnel); empty keeps the old
+  localhost-only trust.
+- **Session age in diagnostics:** the dashboard diagnostics show how
+  old the Facebook discovery session is and warn past 60 days.
 
 ### Tests
 
