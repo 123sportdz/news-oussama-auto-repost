@@ -1098,15 +1098,31 @@ document.querySelectorAll('form').forEach(function(f) {{
 </body></html>"""
 
 
+def resolve_port(cli_port: int | None = None) -> int:
+    """Dashboard port: --port wins, then DASHBOARD_PORT from .env,
+    then 8080. A non-numeric .env value falls back to 8080.
+
+    .env.example documents DASHBOARD_PORT, but until this fix nothing
+    ever read it — the dashboard always bound 8080.
+    """
+    if cli_port:
+        return cli_port
+    try:
+        return int(env("DASHBOARD_PORT") or 8080)
+    except ValueError:
+        return 8080
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="src.dashboard")
-    ap.add_argument("--port", type=int, default=8080)
+    ap.add_argument("--port", type=int, default=None)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--no-browser", action="store_true",
                     help="do not open the browser automatically")
     a = ap.parse_args(argv)
-    server = ThreadingHTTPServer((a.host, a.port), Handler)
-    url = f"http://{a.host}:{a.port}"
+    port = resolve_port(a.port)
+    server = ThreadingHTTPServer((a.host, port), Handler)
+    url = f"http://{a.host}:{port}"
     if not a.no_browser:
         def _open() -> None:
             import time

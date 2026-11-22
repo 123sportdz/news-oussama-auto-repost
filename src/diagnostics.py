@@ -18,6 +18,7 @@ sys.path.insert(0, str(BASE))
 from src import state as state_mod  # noqa: E402
 from src.config import load_config  # noqa: E402
 from src.discover import AUTH_FILE  # noqa: E402
+from src.downloader import _ytdlp  # noqa: E402
 
 DIAGNOSTICS = BASE / "state" / "diagnostics.json"
 
@@ -47,7 +48,7 @@ def run_checks(cfg: dict | None = None) -> list[dict]:
     checks.append(_check("ffmpeg", bool(ffmpeg),
                          ffmpeg or "غير موجود — ثبّته وأضفه للـ PATH"))
 
-    code, out = _run(["yt-dlp", "--version"])
+    code, out = _run([_ytdlp(), "--version"])
     checks.append(_check("yt-dlp", code == 0,
                          out.strip().splitlines()[-1]
                          if out.strip() else "غير موجود"))

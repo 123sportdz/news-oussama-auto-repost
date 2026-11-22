@@ -51,6 +51,33 @@ class SessionCheckTest(unittest.TestCase):
         self.assertIn("منذ 90 يوم", row["detail"])
         self.assertIn("--login", row["detail"])
 
+    def test_ytdlp_check_uses_resolved_binary(self):
+        """Diagnostics must use the same binary the downloader uses.
+
+        Regression: it ran bare "yt-dlp --version", which fails when
+        ~/.local/bin is not on PATH — while the downloader falls back
+        to ~/.local/bin/yt-dlp and downloads fine. The dashboard then
+        wrongly showed yt-dlp as broken.
+        """
+        from src.downloader import _ytdlp
+
+        seen: list = []
+
+        def recording_run(cmd, timeout=25):
+            seen.append(cmd)
+            return 0, "2026.10.26\n"
+
+        diagnostics._run = recording_run
+        try:
+            rows = diagnostics.run_checks(
+                {"sources": [{"enabled": True}], "destinations": []})
+        finally:
+            diagnostics._run = self._orig_run
+        self.assertIn([_ytdlp(), "--version"], seen)
+        row = [r for r in rows if r["name"] == "yt-dlp"][0]
+        self.assertTrue(row["ok"])
+        self.assertIn("2026.10.26", row["detail"])
+
 
 if __name__ == "__main__":
     unittest.main()
