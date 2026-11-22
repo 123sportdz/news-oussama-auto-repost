@@ -226,6 +226,30 @@ class DashboardServerTest(unittest.TestCase):
         finally:
             os.environ.pop("DASHBOARD_PASSWORD", None)
 
+    def test_resolve_port_prefers_cli_then_env_then_default(self):
+        import os
+
+        from src import config as config_mod
+        orig_port = os.environ.get("DASHBOARD_PORT")
+        orig_loaded = config_mod._DOTENV_LOADED
+        config_mod._DOTENV_LOADED = True
+        try:
+            os.environ.pop("DASHBOARD_PORT", None)
+            self.assertEqual(dashboard.resolve_port(), 8080)
+            self.assertEqual(dashboard.resolve_port(9090), 9090)
+            os.environ["DASHBOARD_PORT"] = "18080"
+            self.assertEqual(dashboard.resolve_port(), 18080)
+            # --port still wins over the env var
+            self.assertEqual(dashboard.resolve_port(9090), 9090)
+            os.environ["DASHBOARD_PORT"] = "not-a-port"
+            self.assertEqual(dashboard.resolve_port(), 8080)
+        finally:
+            if orig_port is None:
+                os.environ.pop("DASHBOARD_PORT", None)
+            else:
+                os.environ["DASHBOARD_PORT"] = orig_port
+            config_mod._DOTENV_LOADED = orig_loaded
+
     def test_queue_post_adds_url(self):
         queue = BASE / "state" / "queue.txt"
         before = queue.read_text() if queue.exists() else ""
