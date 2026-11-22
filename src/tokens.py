@@ -207,6 +207,50 @@ def save_token_status(status: dict) -> None:
     state_mod.save_json(BASE / "state" / "token_status.json", status)
 
 
+def validate_stored_tokens(cfg: dict, urlopen=None) -> list[dict]:
+    """Re-validate every stored Page token against the Graph API.
+
+    A token that was fine can die later (the user changes their
+    Facebook password, removes the app, or loses their Page role) —
+    this is how the project finds out before the next publish fails.
+    Updates state/token_status.json in the same shape the Tokens page
+    writes, and returns one row per Page destination: name / page_id /
+    status ("ok" / "invalid" / "missing") / page_name / error /
+    checked_at. Destinations with no token at all are reported as
+    "missing" and never alert — that is a setup state, not a failure.
+    """
+    stored = load_token_status()
+    tokens = read_env_tokens()
+    rows: list[dict] = []
+    for dest in cfg.get("destinations", []):
+        if dest.get("kind") == "profile":
+            continue
+        page_id = str(dest.get("page_id") or "")
+        name = dest.get("name") or page_id
+        key = env_key_for_page(page_id)
+        value = tokens.get(key, "")
+        if not value:
+            rows.append({"name": name, "page_id": page_id,
+                         "status": "missing", "page_name": "",
+                         "error": "ما كاين حتى توكن — الصقو في صفحة التوكنات",
+                         "checked_at": ""})
+            continue
+        result = validate_token(value, page_id, urlopen=urlopen)
+        checked_at = now_iso()
+        stored[page_id] = {
+            **result,
+            "token_fingerprint": token_fingerprint(value),
+            "checked_at": checked_at,
+        }
+        rows.append({"name": name, "page_id": page_id,
+                     "status": "ok" if result["ok"] else "invalid",
+                     "page_name": result.get("page_name", ""),
+                     "error": result.get("error", ""),
+                     "checked_at": checked_at})
+    save_token_status(stored)
+    return rows
+
+
 def destination_token_status(cfg: dict) -> list[dict]:
     """One status row per Page destination (profile needs no token).
 

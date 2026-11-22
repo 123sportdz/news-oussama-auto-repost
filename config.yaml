@@ -14,6 +14,7 @@ settings:
     crop_to_9x16: false
     max_duration_seconds: 0
     loudnorm: false
+    min_duration_seconds: 0
   publish:
     mode: auto
     windows: []

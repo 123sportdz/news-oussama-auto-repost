@@ -235,6 +235,11 @@ def main(argv: list[str] | None = None) -> None:
     if errors and total_new == 0:
         print("Discovery failed: no source could be read — "
               "check the errors above.")
+        from src.notify import notify
+        notify("⚠️ NEWS OUSSAMA — الاكتشاف فشل: حتى مصدر ما تقراش.\n"
+               + "\n".join(f"• {name}: {err}" for name, err in errors.items())
+               + "\nافتح الداشبورد ← التشخيص، ولا سجّل الدخول مجددا: "
+                 "python -m src.discover --login")
         raise SystemExit(1)
     print(f"Discovery done: {total_new} new post(s) added to the queue.")
 

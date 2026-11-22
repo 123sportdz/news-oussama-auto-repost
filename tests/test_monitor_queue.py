@@ -108,7 +108,6 @@ class RequeueFailedTest(unittest.TestCase):
     requeuing, so the next failure recorded attempt 1 again and the
     URL was retried on every run instead of being given up on.
     """
-
     def test_attempts_counter_survives_requeue(self):
         ready_before = state_mod.load_json(state_mod.READY, {})
         queue_before = QUEUE.read_text() if QUEUE.exists() else ""
@@ -148,6 +147,61 @@ class RequeueFailedTest(unittest.TestCase):
                     mon.FAILED.unlink()
             else:
                 mon.FAILED.write_text(failed_before)
+
+
+class QualityFilterTest(unittest.TestCase):
+    """Clips shorter than editor.min_duration_seconds are skipped."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self.tmp = tempfile.TemporaryDirectory()
+        self._orig_dl = mon.DL
+        mon.DL = Path(self.tmp.name)
+        self.seen_before = state_mod.load_json(state_mod.SEEN, {})
+        self.cfg = {"settings": {
+                        "watermark": {"enabled": False},
+                        "editor": {"min_duration_seconds": 5},
+                        "caption": {}},
+                    "destinations": []}
+        self._orig = {}
+        for name in ("post_info", "download_video", "media_ok",
+                     "media_duration", "file_sha256",
+                     "find_duplicate_by_hash"):
+            self._orig[name] = getattr(mon, name)
+        mon.post_info = lambda url: {
+            "post_id": "123", "caption": "x", "owner": "o",
+            "created": "c", "media_type": "video"}
+        mon.download_video = lambda url, path: path.write_bytes(b"fake")
+        mon.media_ok = lambda path, is_photo=False: True
+        mon.file_sha256 = lambda path: "abc"
+        mon.find_duplicate_by_hash = lambda seen, h, exclude_pid=None: None
+
+    def tearDown(self):
+        for name, fn in self._orig.items():
+            setattr(mon, name, fn)
+        mon.DL = self._orig_dl
+        state_mod.save_json(state_mod.SEEN, self.seen_before)
+        self.tmp.cleanup()
+
+    def test_short_clip_is_skipped(self):
+        mon.media_duration = lambda path: 2.0
+        with self.assertRaises(SystemExit) as ctx:
+            mon.process_url("https://www.facebook.com/reel/123", self.cfg)
+        self.assertIn("too short", str(ctx.exception))
+
+    def test_long_clip_passes(self):
+        mon.media_duration = lambda path: 10.0
+        rec = mon.process_url("https://www.facebook.com/reel/123",
+                              self.cfg)
+        self.assertEqual(rec["post_id"], "123")
+
+    def test_filter_off_when_min_is_zero(self):
+        mon.media_duration = lambda path: 2.0
+        self.cfg["settings"]["editor"]["min_duration_seconds"] = 0
+        rec = mon.process_url("https://www.facebook.com/reel/123",
+                              self.cfg)
+        self.assertEqual(rec["post_id"], "123")
 
 
 if __name__ == "__main__":
