@@ -144,8 +144,11 @@ class FailedRetryTest(unittest.TestCase):
         urls = monitor_mod.requeue_failed(["https://example.invalid/c"])
         self.assertEqual(urls, ["https://example.invalid/a",
                                 "https://example.invalid/c"])
-        self.assertNotIn("https://example.invalid/a",
-                         monitor_mod.load_failed())
+        # the requeued entry stays in failed.txt with its attempts count,
+        # so the next failure increments it instead of resetting to 1
+        self.assertEqual(
+            monitor_mod.load_failed()["https://example.invalid/a"]
+            ["attempts"], 1)
 
     def test_old_format_without_attempts_defaults_to_one(self):
         monitor_mod.FAILED.write_text(

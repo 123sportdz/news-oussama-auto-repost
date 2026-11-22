@@ -424,16 +424,18 @@ def _process_queue_locked(cfg: dict, urls: list[str], limit: int,
 
 
 def requeue_failed(urls: list[str]) -> list[str]:
-    """Prepend failed URLs with attempts left to the queue (deduped)."""
+    """Prepend failed URLs with attempts left to the queue (deduped).
+
+    The failed.txt entry is deliberately kept in place: dropping it
+    here would reset the attempts counter, so the next failure would
+    record attempt 1 again and the URL would be retried forever
+    instead of giving up after MAX_FAILED_ATTEMPTS. The entry is
+    removed only when the retry succeeds (see _process_queue_locked).
+    """
     failed = load_failed()
     retry = [u for u, info in failed.items()
              if info.get("attempts", 1) < MAX_FAILED_ATTEMPTS
              and u not in urls]
-    if not retry:
-        return urls
-    for url in retry:
-        failed.pop(url, None)
-    save_failed(failed)
     return retry + urls
 
 
