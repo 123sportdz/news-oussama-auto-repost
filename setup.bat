@@ -1,7 +1,7 @@
 @echo off
 REM NEWS OUSSAMA Auto Repost — Windows one-command setup (PowerShell / cmd)
 REM   .\setup.bat            — checks everything, installs deps, runs one monitor check
-REM   .\setup.bat --auto     — monitor loop every 30 minutes (Ctrl+C to stop)
+REM   .\setup.bat --auto     — discover + monitor loop every 30 minutes (Ctrl+C to stop)
 REM   .\setup.bat --dashboard — start the local dashboard on http://127.0.0.1:8080 (opens in your browser)
 cd /d %~dp0
 echo == NEWS OUSSAMA Auto Repost — readiness check ==
