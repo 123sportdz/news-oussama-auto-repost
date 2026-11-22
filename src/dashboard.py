@@ -21,6 +21,8 @@ Features:
 from __future__ import annotations
 
 import argparse
+import base64
+import hmac
 import html
 import json
 import mimetypes
@@ -374,6 +376,18 @@ def _process_url_job(url: str) -> None:
         set_status(f"❌ خطأ أثناء سحب {url}: {exc}", False)
 
 
+def _cleanup_job() -> None:
+    try:
+        from src.cleanup import cleanup_downloads
+        cfg = load_config()
+        result = cleanup_downloads(cfg)
+        freed = result["freed_bytes"] / (1024 * 1024)
+        set_status(f"🧹 تنظيف: حُذف {len(result['deleted'])} ملف، "
+                   f"تحرر {freed:.1f} MB")
+    except Exception as exc:  # noqa: BLE001 — surfaced in the banner
+        set_status(f"❌ خطأ أثناء التنظيف: {exc}", False)
+
+
 def _refresh_stats_job() -> None:
     try:
         cfg = load_config()
@@ -446,9 +460,47 @@ def _resolve_download(pid: str) -> Path | None:
     return None
 
 
+def _auth_ok(handler) -> bool:
+    """True when no dashboard password is set, or the request carries
+    valid HTTP Basic auth for it.
+
+    The password lives in .env as DASHBOARD_PASSWORD. Empty (the
+    default) keeps the old behavior: the dashboard trusts localhost
+    only. Set a password before exposing the port (e.g. via a tunnel)
+    so the dashboard — which can publish, delete tokens and read
+    state — is not open to anyone who finds the URL. The username is
+    free; only the password is checked, in constant time.
+    """
+    password = env("DASHBOARD_PASSWORD")
+    if not password:
+        return True
+    auth = handler.headers.get("Authorization") or ""
+    if not auth.startswith("Basic "):
+        return False
+    try:
+        decoded = base64.b64decode(
+            auth[6:].strip()).decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001 — malformed auth header
+        return False
+    supplied = decoded.split(":", 1)[-1] if ":" in decoded else decoded
+    return hmac.compare_digest(supplied, password)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):  # keep the console quiet
         pass
+
+    def _unauthorized(self) -> None:
+        body = ("<h1>401 — هاد اللوحة محمية بكلمة سر</h1>"
+                "<p>دخل كلمة السر (DASHBOARD_PASSWORD) باش تكمل.</p>"
+                ).encode("utf-8")
+        self.send_response(401)
+        self.send_header("WWW-Authenticate",
+                         'Basic realm="NEWS OUSSAMA"')
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _send(self, body: str, ctype: str = "text/html; charset=utf-8",
               status: int = 200):
@@ -503,6 +555,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        if not _auth_ok(self):
+            return self._unauthorized()
         if self.path == "/config.yaml":
             # serve the user's actual file, not the merged defaults
             config_file = BASE / "config.yaml"
@@ -538,6 +592,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send("<h1>404</h1>", status=404)
 
     def do_POST(self):
+        if not _auth_ok(self):
+            return self._unauthorized()
         try:
             length = int(self.headers.get("Content-Length") or 0)
             body = self.rfile.read(length).decode("utf-8")
@@ -660,6 +716,10 @@ class Handler(BaseHTTPRequestHandler):
             set_status("⏳ جارٍ تحديث الإحصائيات …")
             _run_in_background(_refresh_stats_job)
             return self._redirect_home()
+        elif path == "/cleanup":
+            set_status("⏳ جارٍ تنظيف الملفات القديمة …")
+            _run_in_background(_cleanup_job)
+            return self._redirect_home()
         elif path == "/discover":
             set_status("⏳ جارٍ اكتشاف منشورات جديدة من المصادر …")
             _run_in_background(_discover_job)
@@ -716,6 +776,10 @@ class Handler(BaseHTTPRequestHandler):
                 if min_dur >= 0:
                     settings.setdefault("editor", {})[
                         "min_duration_seconds"] = min_dur
+                keep_days = int(get("keep_days") or 0)
+                if keep_days >= 0:
+                    settings.setdefault("cleanup", {})[
+                        "keep_days"] = keep_days
             except ValueError:
                 pass
             position = get("wm_position")
@@ -890,6 +954,7 @@ def home_page() -> str:
 قالب النص <input name="caption_template" value="{esc(cap.get('template'))}" size="30"> |
 هاشتاغات <input name="hashtags" value="{esc(', '.join(cap.get('hashtags') or []))}" size="20" placeholder="#كرة, #أخبار"><br>
 أقصر مدة للكليب <input name="min_duration" value="{esc((settings.get('editor') or {}).get('min_duration_seconds', 0))}" size="3"> ثانية (0 = الكل) |
+الاحتفاظ بالملفات <input name="keep_days" value="{esc((settings.get('cleanup') or {}).get('keep_days', 30))}" size="3"> يوم (0 = أبدا ما يتحذف) |
 الوضع <select name="mode">
 <option value="auto"{" selected" if pub.get('mode') == 'auto' else ''}>تلقائي (نشر مباشر)</option>
 <option value="draft"{" selected" if pub.get('mode') == 'draft' else ''}>مسودة (مراجعة أولا)</option>
@@ -996,6 +1061,8 @@ def home_page() -> str:
 <div class="card">
 <h2>📊 إحصائيات المنشورات</h2>
 <form method="post" action="/refresh-stats"><button>🔄 تحديث الإحصائيات</button></form>
+<form method="post" action="/cleanup"><button>🧹 تنظيف الملفات القديمة</button></form>
+<p style="color:var(--muted);font-size:13px">التنظيف يحذف ملفات التحميل الأقدم من {esc((settings.get('cleanup') or {}).get('keep_days', 30))} يوم للمنشورات المنشورة في كل الوجهات — المنشورات الجاهزة ما تتمسش.</p>
 {table(stats_rows, ["المنشور", "الوجهة", "الرابط", "التفاعل", "آخر تحديث"]) if stats_rows else "<p style='color:var(--muted)'>لا توجد إحصائيات بعد — انشر منشورا ثم اضغط تحديث الإحصائيات.</p>"}
 </div>
 

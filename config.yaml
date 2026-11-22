@@ -18,6 +18,8 @@ settings:
   publish:
     mode: auto
     windows: []
+  cleanup:
+    keep_days: 30
   discovery:
     max_per_source: 5
     scroll_steps: 4

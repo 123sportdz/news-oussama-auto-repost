@@ -180,6 +180,52 @@ class DashboardServerTest(unittest.TestCase):
         self.assertTrue(sent.called)
         self.assertIn("وصلت رسالة الاختبار", page)
 
+    def test_dashboard_password_gates_get_and_post(self):
+        import base64
+        import os
+        os.environ["DASHBOARD_PASSWORD"] = "secret123"
+        try:
+            # no credentials -> 401
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(self._url("/"))
+            self.assertEqual(ctx.exception.code, 401)
+            # wrong password -> 401
+            bad = base64.b64encode(b"user:wrong").decode()
+            req = urllib.request.Request(
+                self._url("/"),
+                headers={"Authorization": f"Basic {bad}"})
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(req)
+            self.assertEqual(ctx.exception.code, 401)
+            # right password -> 200
+            good = base64.b64encode(b"user:secret123").decode()
+            req = urllib.request.Request(
+                self._url("/"),
+                headers={"Authorization": f"Basic {good}"})
+            with urllib.request.urlopen(req) as resp:
+                self.assertEqual(resp.status, 200)
+            # POST without credentials -> 401; with them -> 303
+            req = urllib.request.Request(self._url("/cleanup"), data=b"",
+                                         method="POST")
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(req)
+            self.assertEqual(ctx.exception.code, 401)
+
+            class NoRedirect(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, req, fp, code, msg, headers,
+                                     newurl):
+                    raise urllib.error.HTTPError(newurl, code, msg,
+                                                 headers, fp)
+            opener = urllib.request.build_opener(NoRedirect)
+            req = urllib.request.Request(
+                self._url("/cleanup"), data=b"", method="POST",
+                headers={"Authorization": f"Basic {good}"})
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                opener.open(req)
+            self.assertEqual(ctx.exception.code, 303)
+        finally:
+            os.environ.pop("DASHBOARD_PASSWORD", None)
+
     def test_queue_post_adds_url(self):
         queue = BASE / "state" / "queue.txt"
         before = queue.read_text() if queue.exists() else ""

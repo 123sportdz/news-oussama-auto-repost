@@ -35,3 +35,8 @@ config.yaml.bak
 !state/.gitkeep
 !state/downloads/.gitkeep
 state/monitor.lock
+
+# State backups (can be hundreds of MB — never commit)
+backups/
+state/last_token_check
+state/monitor.lock

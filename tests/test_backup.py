@@ -21,6 +21,8 @@ class BackupTest(unittest.TestCase):
         (backup.STATE_DIR / "seen.json").write_text('{}')
         (backup.STATE_DIR / "monitor.lock").write_text("123")
         (backup.STATE_DIR / ".seen.json.tmp").write_text("partial")
+        (backup.STATE_DIR / "downloads").mkdir()
+        (backup.STATE_DIR / "downloads" / "clip.mp4").write_bytes(b"video")
 
     def tearDown(self):
         backup.STATE_DIR = self._orig_state
@@ -36,6 +38,9 @@ class BackupTest(unittest.TestCase):
         self.assertIn("seen.json", names)
         self.assertNotIn("monitor.lock", names)
         self.assertNotIn(".seen.json.tmp", names)
+        # videos are re-downloadable; including them made one backup
+        # 460 MB — only the history is backed up
+        self.assertNotIn("downloads/clip.mp4", names)
 
     def test_if_due_skips_when_fresh(self):
         now = datetime(2026, 11, 22, 12, 0, 0)

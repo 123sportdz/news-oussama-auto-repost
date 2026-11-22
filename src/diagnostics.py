@@ -9,6 +9,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent.parent
@@ -61,10 +62,21 @@ def run_checks(cfg: dict | None = None) -> list[dict]:
             "غير مثبّت — شغّل: pip install playwright && "
             "python -m playwright install chromium"))
 
-    checks.append(_check(
-        "جلسة فيسبوك (اكتشاف المنشورات)", AUTH_FILE.exists(),
-        "موجودة" if AUTH_FILE.exists()
-        else "غير موجودة — شغّل: python -m src.discover --login"))
+    if AUTH_FILE.exists():
+        # A session file only proves a login happened once — a stale
+        # one (months old) usually means discovery silently finds 0
+        # new posts. 60 days is a warning, not proof of expiry.
+        age_days = (datetime.now()
+                    - datetime.fromtimestamp(AUTH_FILE.stat().st_mtime)).days
+        checks.append(_check(
+            "جلسة فيسبوك (اكتشاف المنشورات)", age_days <= 60,
+            f"موجودة (منذ {age_days} يوم)"
+            + (" — قديمة: إذا الاكتشاف لقى 0 منشورات، سجّل الدخول مجددا: "
+               "python -m src.discover --login" if age_days > 60 else "")))
+    else:
+        checks.append(_check(
+            "جلسة فيسبوك (اكتشاف المنشورات)", False,
+            "غير موجودة — شغّل: python -m src.discover --login"))
 
     cli = shutil.which("facebook-cli") or "/opt/hatch/bin/facebook-cli"
     code, out = _run([cli, "pages", "list"])

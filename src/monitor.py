@@ -598,6 +598,18 @@ def main(argv: list[str] | None = None) -> None:
     elif not a.dry_run:
         publish_ready(cfg)
 
+    # Retention: downloads/ grows forever (441 MB on the VM on
+    # 2026-11-22). Delete old files of fully-published posts — but a
+    # cleanup failure must never block the run.
+    try:
+        from src.cleanup import cleanup_downloads
+        result = cleanup_downloads(cfg)
+        if result["deleted"]:
+            print(f"  🧹 cleanup: deleted {len(result['deleted'])} file(s), "
+                  f"freed {result['freed_bytes'] / (1024 * 1024):.1f} MB")
+    except Exception as exc:  # noqa: BLE001 — cleanup is best-effort
+        print(f"  ! cleanup failed (continuing): {exc}")
+
 
 if __name__ == "__main__":
     main()
