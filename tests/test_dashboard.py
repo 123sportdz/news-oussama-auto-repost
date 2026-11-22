@@ -142,6 +142,44 @@ class DashboardServerTest(unittest.TestCase):
         self.assertIn("/tokens", page)
         self.assertIn("توكنات الصفحات", page)
 
+    def test_home_page_has_telegram_card(self):
+        with urllib.request.urlopen(self._url("/")) as resp:
+            page = resp.read().decode("utf-8")
+        self.assertIn("تنبيهات Telegram", page)
+        self.assertIn("/telegram", page)
+        self.assertIn("/telegram-test", page)
+
+    def test_telegram_settings_saved_to_env(self):
+        from src import tokens as tokens_mod
+        from src.config import env as getenv
+        data = urllib.parse.urlencode({
+            "bot_token": "123456:TEST-BOT-TOKEN",
+            "chat_id": "987654321"}).encode()
+        req = urllib.request.Request(self._url("/telegram"), data=data,
+                                     method="POST")
+        try:
+            with urllib.request.urlopen(req) as resp:
+                page = resp.read().decode("utf-8")
+            self.assertIn("تم حفظ إعدادات Telegram", page)
+            self.assertEqual(getenv("TELEGRAM_BOT_TOKEN"),
+                             "123456:TEST-BOT-TOKEN")
+            self.assertEqual(getenv("TELEGRAM_CHAT_ID"), "987654321")
+        finally:
+            tokens_mod.write_env_tokens(
+                {}, remove=("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"))
+
+    def test_telegram_test_button_reports_result(self):
+        from unittest import mock
+        data = b""
+        req = urllib.request.Request(self._url("/telegram-test"), data=data,
+                                     method="POST")
+        with mock.patch("src.notify.send_telegram",
+                        return_value=True) as sent:
+            with urllib.request.urlopen(req) as resp:
+                page = resp.read().decode("utf-8")
+        self.assertTrue(sent.called)
+        self.assertIn("وصلت رسالة الاختبار", page)
+
     def test_queue_post_adds_url(self):
         queue = BASE / "state" / "queue.txt"
         before = queue.read_text() if queue.exists() else ""

@@ -130,6 +130,45 @@ settings:
 لملف الفيديو/الصورة، وإذا البصمة موجودة من قبل يتخطاه — ما يعاودش ينشر
 نفس المقطع مرتين.
 
+### تنبيهات Telegram 🔔
+
+النشر، فشل الاكتشاف، وموت توكن صفحة — كلها توصل تنبيه فوري على
+Telegram. أنشئ بوت من `@BotFather` (`/newbot`)، وجيب معرّف الشات من
+`@userinfobot`، والصقهم في الداشبورد (بطاقة "🔔 تنبيهات Telegram") أو
+في `.env` (`TELEGRAM_BOT_TOKEN` و `TELEGRAM_CHAT_ID`). بلا هاد القيمتين
+التنبيهات ساكتة — ما يتعطل والو.
+
+### تشغيل تلقائي مع ويندوز
+
+`.\autostart.bat` يسجّل مهمة مجدولة تشغّل `setup.bat --auto` عند كل
+تسجيل دخول — بلا ما تشغلو بيدك بعد إعادة التشغيل. للإزالة:
+`.\autostart.bat remove`.
+
+### نسخة احتياطية لحالة النشر 💾
+
+كل فحص يدير نسخة من `state/` في `backups/` إذا فاتت 24 ساعة على آخر
+نسخة (يحتفظ بآخر 7). للاسترجاع — وقّف الحلقة التلقائية أولا، بعدها:
+`python -m src.backup --restore backups/state-YYYYMMDD-HHMMSS.zip`
+
+### فحص التوكنات اليومي
+
+التوكنات بلا تاريخ انتهاء بصح يموتو إذا بدّلت كلمة السر ولا نحّيت
+التطبيق ولا خسرت دورك في الصفحة. كل دورة تشوف إذا فات نهار على آخر
+فحص، وإذا فات تعاود التحقق من التوكنات عبر Graph API — والتوكن الميت
+يوصلك تنبيه Telegram، وحالتو تتبدل في الداشبورد.
+
+### تقرير الأداء عبر Graph API 📊
+
+زر "🔄 تحديث الإحصائيات" في الداشبورد يقرا المشاهدات والإعجابات
+والتعليقات لكل منشور منشور — عبر Graph API بالتوكنات (يخدم على
+ويندوز)، مع الرجوع لـ `facebook-cli` للبروفايل والوجهات بلا توكن.
+
+### فلتر الجودة
+
+الكليبات الأقصر من مدة معينة تتجاهل (ما تتنشرش). فعّلو من الداشبورد
+(حقل "أقصر مدة للكليب" في الإعدادات) أو من `config.yaml`:
+`editor.min_duration_seconds` — القيمة 0 تعني الكل مقبول.
+
 ### قراءة المنشورات: بديل تلقائي
 
 `facebook-cli post read` ما يشوفش المنشورات الجداد (يرجع "post not
@@ -296,6 +335,26 @@ visible bottom-right.
 broadcasts and that the source pages repost them — that is his claim, not
 our verification. A logo does not transfer ownership, and Facebook detects
 duplicate video. Only use this on content you have the right to repost.
+
+### Telegram alerts, autostart, backups, token checks, Graph stats, quality filter
+
+- **Telegram alerts:** create a bot via `@BotFather`, get your chat id
+  from `@userinfobot`, paste both in the dashboard ("🔔 تنبيهات
+  Telegram") or in `.env` (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`).
+  Silent until both are set.
+- **Autostart on Windows:** `.\autostart.bat` registers the auto loop
+  at logon; `.\autostart.bat remove` removes it.
+- **State backups:** every run backs up `state/` to `backups/` when the
+  last backup is older than 24h (keeps 7). Restore:
+  `python -m src.backup --restore backups/state-YYYYMMDD-HHMMSS.zip`
+  (stop the auto loop first).
+- **Daily token check:** stored Page tokens are re-validated once a day;
+  a dead token triggers a Telegram alert and shows in the dashboard.
+- **Performance stats:** the dashboard refresh reads views/likes/
+  comments via the Graph API (works on Windows), falling back to
+  `facebook-cli` for the profile.
+- **Quality filter:** clips shorter than `editor.min_duration_seconds`
+  are skipped (0 = off), settable in the dashboard settings.
 
 ### Tests
 

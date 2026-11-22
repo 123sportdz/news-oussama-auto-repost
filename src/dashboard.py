@@ -682,6 +682,24 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(
                     tokens_page(f"🗑 حُذف توكن الصفحة {page_id} من .env", True))
             return self._send(tokens_page("page_id ناقص", False))
+        elif path == "/telegram":
+            # Telegram secrets live in .env (never in config.yaml,
+            # which is tracked in git) — same pattern as Page tokens.
+            updates = {}
+            if get("bot_token").strip():
+                updates["TELEGRAM_BOT_TOKEN"] = get("bot_token").strip()
+            if get("chat_id").strip():
+                updates["TELEGRAM_CHAT_ID"] = get("chat_id").strip()
+            if updates:
+                tokens_mod.write_env_tokens(updates)
+                set_status("🔔 تم حفظ إعدادات Telegram في .env")
+            else:
+                set_status("الصق توكن البوت ومعرّف الشات أولا", False)
+        elif path == "/telegram-test":
+            from src.notify import send_telegram
+            ok = send_telegram("🧪 NEWS OUSSAMA — التنبيهات خدامة ✅")
+            set_status("✅ وصلت رسالة الاختبار على Telegram" if ok else
+                       "❌ ما وصلتش — تحقق من توكن البوت ومعرّف الشات", ok)
         elif path == "/settings":
             settings = cfg.setdefault("settings", {})
             try:
@@ -694,6 +712,10 @@ class Handler(BaseHTTPRequestHandler):
                 size = int(get("wm_size") or 0)
                 if size > 0:
                     settings.setdefault("watermark", {})["size_px"] = size
+                min_dur = int(get("min_duration") or 0)
+                if min_dur >= 0:
+                    settings.setdefault("editor", {})[
+                        "min_duration_seconds"] = min_dur
             except ValueError:
                 pass
             position = get("wm_position")
@@ -867,6 +889,7 @@ def home_page() -> str:
 </select><br>
 قالب النص <input name="caption_template" value="{esc(cap.get('template'))}" size="30"> |
 هاشتاغات <input name="hashtags" value="{esc(', '.join(cap.get('hashtags') or []))}" size="20" placeholder="#كرة, #أخبار"><br>
+أقصر مدة للكليب <input name="min_duration" value="{esc((settings.get('editor') or {}).get('min_duration_seconds', 0))}" size="3"> ثانية (0 = الكل) |
 الوضع <select name="mode">
 <option value="auto"{" selected" if pub.get('mode') == 'auto' else ''}>تلقائي (نشر مباشر)</option>
 <option value="draft"{" selected" if pub.get('mode') == 'draft' else ''}>مسودة (مراجعة أولا)</option>
@@ -892,6 +915,22 @@ def home_page() -> str:
 <p style="color:var(--muted);font-size:13px">البروفايل ينشر عبر facebook-cli — ما يحتاجش توكن. التوكنات تتحفظ برك في ملف .env المحلي، وما تبانش كاملة أبدا.</p>
 <p><a href="/tokens">🔑 إعداد التوكنات</a> — الصق توكن كل صفحة، يتحقق منو ويتحفظ وحدو.</p>
 </div>"""
+    tg_token = env("TELEGRAM_BOT_TOKEN")
+    tg_chat = env("TELEGRAM_CHAT_ID")
+    tg_status = ("✅ مفعّلة" if tg_token and tg_chat else
+                 "❌ مش مفعّلة — الصق توكن البوت ومعرّف الشات")
+    telegram_card = f"""
+<div class="card">
+<h2>🔔 تنبيهات Telegram</h2>
+<p>{tg_status}{f" • الشات <code>{esc(tg_chat)}</code>" if tg_chat else ""}{f" • البوت <code>{esc(tokens_mod.mask_token(tg_token))}</code>" if tg_token else ""}</p>
+<p style="color:var(--muted);font-size:13px">تنبيه عند كل نشر (ملخص الفحص)، وعند فشل الاكتشاف أو موت توكن صفحة. أنشئ بوت من @BotFather وجيب معرّف الشات من @userinfobot.</p>
+<form method="post" action="/telegram">
+<input type="password" name="bot_token" placeholder="توكن البوت" style="width:45%" autocomplete="off">
+<input name="chat_id" placeholder="معرّف الشات" style="width:25%">
+<button class="primary">💾 حفظ</button>
+</form>
+<form method="post" action="/telegram-test"><button>🧪 ابعث رسالة اختبار</button></form>
+</div>"""
     stats_cards = f"""
 <div class="stats">
 <div class="stat"><div class="num">{len(queue_urls)}</div><div class="lbl">في الطابور</div></div>
@@ -915,6 +954,7 @@ def home_page() -> str:
 {status_html}
 {stats_cards}
 {token_card}
+{telegram_card}
 
 <div class="card">
 <h2>📥 أضف منشور للطابور</h2>

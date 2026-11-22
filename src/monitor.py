@@ -167,6 +167,21 @@ def refresh_ready(cfg: dict) -> dict:
     return ready
 
 
+def media_duration(path: Path) -> float:
+    """Video duration in seconds (ffprobe); 0.0 when unreadable."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(path)],
+            text=True, capture_output=True, timeout=30)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return 0.0
+    try:
+        return float((result.stdout or "0").strip() or 0)
+    except ValueError:
+        return 0.0
+
+
 def media_ok(path: Path, is_photo: bool = False) -> bool:
     """True when a downloaded/edited media file is complete and readable.
 
@@ -184,17 +199,7 @@ def media_ok(path: Path, is_photo: bool = False) -> bool:
             return True
         except Exception:  # noqa: BLE001 — any unreadable image is bad
             return False
-    try:
-        result = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "csv=p=0", str(path)],
-            text=True, capture_output=True, timeout=30)
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return False
-    try:
-        return float((result.stdout or "0").strip() or 0) > 0
-    except ValueError:
-        return False
+    return media_duration(path) > 0
 
 
 def known_post_ids(seen: dict) -> set[str]:
@@ -253,6 +258,19 @@ def process_url(url: str, cfg: dict) -> dict:
     raw = DL / f"{pid}.{'jpg' if is_photo else 'mp4'}"
     if not media_ok(raw, is_photo):
         download_video(url, raw)
+    if not is_photo:
+        # Quality filter: ignore clips shorter than the configured
+        # minimum (editor.min_duration_seconds, 0 = off). A duration
+        # of 0 means "unreadable" — that is a download problem, not a
+        # short clip, so it is not filtered here.
+        min_duration = int(editor.get("min_duration_seconds", 0) or 0)
+        if min_duration > 0:
+            duration = media_duration(raw)
+            if 0 < duration < min_duration:
+                raise SystemExit(
+                    f"too short ({duration:.1f}s < {min_duration}s) — "
+                    f"skipped by the quality filter "
+                    f"(editor.min_duration_seconds)")
     content_hash = file_sha256(raw)
     seen = state_mod.load_json(state_mod.SEEN, {})
     dup = find_duplicate_by_hash(seen, content_hash, exclude_pid=pid)
@@ -458,6 +476,8 @@ def publish_ready(cfg: dict, token: str = "") -> None:
               f"{next_window_start(windows)}")
         return
     shared = token or env("FB_PAGE_ACCESS_TOKEN")
+    published_count = 0
+    failed: list[str] = []
     for pid, rec in ready.items():
         settings = cfg.get("settings", {})
         cap = settings.get("caption", {})
@@ -475,12 +495,25 @@ def publish_ready(cfg: dict, token: str = "") -> None:
                                  token_for_destination(dest, shared))
             except ConsentMissingError as exc:
                 print(f"  ⏸ {name}: {exc}")
+                failed.append(f"{name}: موافقة Professional Consent ناقصة")
                 continue
             except PublishError as exc:
                 print(f"  ❌ {name}: {exc}")
+                failed.append(f"{name}: {exc}")
                 continue
             state_mod.mark_published(pid, name, result)
             print(f"  ✅ published to {name}: {result}")
+            published_count += 1
+    if published_count or failed:
+        from src.notify import notify
+        lines = ["📰 NEWS OUSSAMA — نتيجة فحص النشر"]
+        if published_count:
+            lines.append(f"✅ تنشر: {published_count}")
+        for item in failed[:5]:
+            lines.append(f"❌ {item}")
+        if len(failed) > 5:
+            lines.append(f"… و {len(failed) - 5} أخطاء أخرى")
+        notify("\n".join(lines))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -507,6 +540,16 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Publish mode: {publish.get('mode', 'draft')} | "
           f"check every {settings.get('check_every_minutes', 30)} min | "
           f"max {settings.get('max_posts_per_check', 3)} per check")
+
+    # state/ is what prevents re-publishing — back it up daily, but a
+    # backup failure must never block the run.
+    try:
+        from src.backup import backup_state_if_due
+        dest = backup_state_if_due()
+        if dest:
+            print(f"  💾 state backed up to {dest}")
+    except Exception as exc:  # noqa: BLE001 — backup is best-effort
+        print(f"  ! state backup failed (continuing): {exc}")
 
     if a.discover:
         from src.discover import discover_all

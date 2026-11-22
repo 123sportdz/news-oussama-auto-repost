@@ -315,6 +315,60 @@ class TokenStatusTest(unittest.TestCase):
         self.assertEqual(self._rows()["NewsDz9"]["status"], "configured")
 
 
+class ValidateStoredTokensTest(unittest.TestCase):
+    """Daily re-validation: a token can die after it was pasted."""
+
+    def setUp(self):
+        _isolate_dotenv(self)
+        self.cfg = {"destinations": [
+            {"name": "NewsDz9", "page_id": NEWS_PAGE},
+            {"name": "aljazaer07", "page_id": DZ7_PAGE},
+            {"name": "Oussama — profile", "kind": "profile"},
+        ]}
+
+    def tearDown(self):
+        _restore_dotenv(self)
+
+    def _valid_urlopen(self):
+        debug = {"data": {"is_valid": True, "type": "PAGE",
+                          "scopes": ["pages_manage_posts",
+                                     "pages_show_list"],
+                          "expires_at": 0}}
+        return make_urlopen(debug, {"id": NEWS_PAGE, "name": "News Dz"})
+
+    def test_missing_token_reported_missing_not_invalid(self):
+        rows = tokens_mod.validate_stored_tokens(self.cfg)
+        by_name = {r["name"]: r for r in rows}
+        self.assertEqual(by_name["NewsDz9"]["status"], "missing")
+        self.assertEqual(by_name["aljazaer07"]["status"], "missing")
+        self.assertNotIn("Oussama — profile", by_name)
+
+    def test_stored_token_revalidated_and_status_saved(self):
+        tokens_mod.write_env_tokens(
+            {f"FB_PAGE_ACCESS_TOKEN_{NEWS_PAGE}": FAKE_TOKEN_NEWS})
+        rows = tokens_mod.validate_stored_tokens(
+            self.cfg, urlopen=self._valid_urlopen())
+        by_name = {r["name"]: r for r in rows}
+        self.assertEqual(by_name["NewsDz9"]["status"], "ok")
+        self.assertEqual(by_name["NewsDz9"]["page_name"], "News Dz")
+        self.assertEqual(by_name["aljazaer07"]["status"], "missing")
+        stored = tokens_mod.load_token_status()
+        self.assertTrue(stored[NEWS_PAGE]["ok"])
+        self.assertEqual(stored[NEWS_PAGE]["page_name"], "News Dz")
+
+    def test_dead_token_reported_invalid(self):
+        tokens_mod.write_env_tokens(
+            {f"FB_PAGE_ACCESS_TOKEN_{NEWS_PAGE}": FAKE_TOKEN_NEWS})
+        debug = {"data": {"is_valid": False, "type": "PAGE",
+                          "scopes": [], "expires_at": 0}}
+        rows = tokens_mod.validate_stored_tokens(
+            self.cfg,
+            urlopen=make_urlopen(debug, {"id": NEWS_PAGE, "name": "News Dz"}))
+        by_name = {r["name"]: r for r in rows}
+        self.assertEqual(by_name["NewsDz9"]["status"], "invalid")
+        self.assertIn("غير صالح", by_name["NewsDz9"]["error"])
+
+
 class DashboardSaveTokensTest(unittest.TestCase):
     def setUp(self):
         _isolate_dotenv(self)

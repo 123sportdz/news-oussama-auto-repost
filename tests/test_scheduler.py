@@ -60,5 +60,61 @@ class SchedulerCycleTest(unittest.TestCase):
         run_once.assert_called_once_with(discover=False)
 
 
+class TokenCheckTest(unittest.TestCase):
+    """The daily token check runs once per day and alerts on dead ones."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+
+        from src import tokens as tokens_mod
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self._orig_base = tokens_mod.BASE
+        tokens_mod.BASE = self.base
+        self.tokens_mod = tokens_mod
+
+    def tearDown(self):
+        self.tokens_mod.BASE = self._orig_base
+        self.tmp.cleanup()
+
+    def test_check_runs_once_per_day(self):
+        calls = []
+
+        def fake_validate(cfg):
+            calls.append(True)
+            return [{"name": "NewsDz9", "status": "ok", "error": ""}]
+
+        cfg = {"destinations": []}
+        with mock.patch.object(self.tokens_mod, "validate_stored_tokens",
+                               fake_validate), \
+                mock.patch.object(scheduler, "load_config",
+                                  return_value=cfg):
+            scheduler.run_token_check()
+            scheduler.run_token_check()
+        self.assertEqual(len(calls), 1)
+        marker = self.base / "state" / "last_token_check"
+        self.assertTrue(marker.exists())
+
+    def test_dead_token_triggers_notification(self):
+        sent = []
+
+        def fake_validate(cfg):
+            return [{"name": "NewsDz9", "status": "invalid",
+                     "error": "التوكن غير صالح"}]
+
+        cfg = {"destinations": []}
+        with mock.patch.object(self.tokens_mod, "validate_stored_tokens",
+                               fake_validate), \
+                mock.patch.object(scheduler, "load_config",
+                                  return_value=cfg), \
+                mock.patch("src.notify.notify",
+                          side_effect=lambda text, **kw: sent.append(text)):
+            scheduler.run_token_check()
+        self.assertEqual(len(sent), 1)
+        self.assertIn("NewsDz9", sent[0])
+
+
 if __name__ == "__main__":
     unittest.main()

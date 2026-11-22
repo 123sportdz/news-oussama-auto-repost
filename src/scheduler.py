@@ -47,10 +47,49 @@ def run_monitor() -> int:
         return 1
 
 
+def run_token_check() -> None:
+    """Validate stored Page tokens once a day; alert on dead ones.
+
+    A Page token has no expiry date but dies when the user changes
+    their Facebook password, removes the app, or loses their Page
+    role. The marker file keeps this to one check per day; a failure
+    to check never blocks the monitor.
+    """
+    from datetime import date
+
+    from src import tokens as tokens_mod
+    marker = tokens_mod.BASE / "state" / "last_token_check"
+    today = date.today().isoformat()
+    try:
+        if marker.exists() and marker.read_text(
+                encoding="utf-8").strip() == today:
+            return
+    except OSError:
+        pass
+    try:
+        cfg = load_config()
+        rows = tokens_mod.validate_stored_tokens(cfg)
+    except Exception as exc:  # noqa: BLE001 — the check must not block
+        print(f"token check failed: {exc}")
+        return
+    bad = [r for r in rows if r["status"] == "invalid"]
+    if bad:
+        from src.notify import notify
+        notify("⚠️ NEWS OUSSAMA — توكنات ميتة، النشر للصفحات متوقف:\n"
+               + "\n".join(f"• {r['name']}: {r['error']}" for r in bad)
+               + "\nأعد جيب التوكنات من صفحة التوكنات في الداشبورد.")
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(today, encoding="utf-8")
+    except OSError:
+        pass
+
+
 def run_once(discover: bool = True) -> int:
     """One full cycle: discover new posts, then process + publish."""
     if discover:
         run_discover()
+    run_token_check()
     return run_monitor()
 
 
