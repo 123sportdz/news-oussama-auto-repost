@@ -2,7 +2,7 @@
 # NEWS OUSSAMA Auto Repost — تشغيل بضغطة واحدة
 #   ./setup.sh              — يفحص كلش، ويشغّل المراقبة مرة واحدة
 #   ./setup.sh --url <رابط>  — يضيف منشور ويعالجو فورا
-#   ./setup.sh --auto       — يشغّل المراقبة في حلقة كل N دقيقة (Ctrl+C للإيقاف)
+#   ./setup.sh --auto       — اكتشاف + مراقبة في حلقة كل N دقيقة (Ctrl+C للإيقاف)
 #   ./setup.sh --dashboard — يشغّل لوحة التحكم على http://127.0.0.1:8080
 set -u
 cd "$(dirname "$0")"

@@ -1,10 +1,48 @@
 """Tests for discovery (URL extraction from page HTML) and diagnostics."""
+import subprocess
 import sys
 import unittest
 from unittest import mock
 
 from src import diagnostics
-from src.discover import _post_id_from_url, extract_post_urls
+from src.discover import _goto_tab, _post_id_from_url, extract_post_urls
+
+
+class FakePage:
+    """Stand-in for a Playwright page: goto fails N times, then works."""
+
+    def __init__(self, failures: int = 0):
+        self.failures = failures
+        self.goto_calls = 0
+        self.waits: list[int] = []
+
+    def goto(self, *args, **kwargs):
+        self.goto_calls += 1
+        if self.goto_calls <= self.failures:
+            raise TimeoutError("net::ERR_CONNECTION_TIMED_OUT")
+
+    def wait_for_timeout(self, ms: int):
+        self.waits.append(ms)
+
+
+class GotoTabRetryTest(unittest.TestCase):
+    """A slow Facebook must not zero out discovery on the first try."""
+
+    def test_first_try_success(self):
+        page = FakePage(failures=0)
+        self.assertTrue(_goto_tab(page, "https://example.invalid/x"))
+        self.assertEqual(page.goto_calls, 1)
+
+    def test_retry_after_timeout_then_success(self):
+        page = FakePage(failures=1)
+        self.assertTrue(_goto_tab(page, "https://example.invalid/x"))
+        self.assertEqual(page.goto_calls, 2)
+        self.assertIn(5000, page.waits)  # pause before the retry
+
+    def test_all_attempts_fail_returns_false(self):
+        page = FakePage(failures=99)
+        self.assertFalse(_goto_tab(page, "https://example.invalid/x"))
+        self.assertEqual(page.goto_calls, 2)  # 1 try + 1 retry
 
 
 class ExtractUrlsTest(unittest.TestCase):

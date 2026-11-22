@@ -86,7 +86,7 @@ docker compose --profile dashboard up  # + لوحة التحكم على :8080
 ```bash
 ./setup.sh                 # فحص + معالجة الطابور مرة واحدة
 ./setup.sh --url <رابط>     # أضف منشور وعالجو فورا
-./setup.sh --auto          # حلقة دورية كل N دقيقة (من config.yaml)
+./setup.sh --auto          # حلقة دورية كل N دقيقة (من config.yaml): اكتشاف منشورات جديدة من المصادر، ثم معالجة ونشر
 ./setup.sh --dashboard     # لوحة التحكم على http://127.0.0.1:8080
 ```
 
@@ -259,7 +259,7 @@ publishing to the Pages does not work.
 ```bash
 ./setup.sh                 # checks + process the queue once
 ./setup.sh --url <url>     # queue one post and process it now
-./setup.sh --auto          # loop every N minutes (from config.yaml)
+./setup.sh --auto          # loop every N minutes (from config.yaml): discover new source posts, then process + publish
 ./setup.sh --dashboard     # dashboard at http://127.0.0.1:8080
 ```
 

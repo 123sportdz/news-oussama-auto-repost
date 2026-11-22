@@ -108,6 +108,27 @@ def _looks_logged_out(page) -> bool:
         return False
 
 
+def _goto_tab(page, url: str, retries: int = 1) -> bool:
+    """Navigate to one source tab, retrying transient failures.
+
+    Facebook often answers slowly or times out on the first try
+    (ERR_CONNECTION_TIMED_OUT seen on Windows) — one retry with a
+    short pause turns a dead discovery run into a working one.
+    Returns True once the page loaded, False after all attempts.
+    """
+    for attempt in range(retries + 1):
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(3000)
+            return True
+        except Exception as exc:  # noqa: BLE001 — next attempt/tab may work
+            print(f"  ! {url}: {exc} "
+                  f"(attempt {attempt + 1}/{retries + 1})")
+            if attempt < retries:
+                page.wait_for_timeout(5000)
+    return False
+
+
 def discover_source(page_url: str, limit: int = 5,
                     scroll_steps: int = 4,
                     auth_file: Path = AUTH_FILE) -> list[str]:
@@ -125,12 +146,7 @@ def discover_source(page_url: str, limit: int = 5,
         ctx = browser.new_context(storage_state=str(auth_file))
         page = ctx.new_page()
         for tab in ("/reels", "/videos", ""):
-            try:
-                page.goto(page_url.rstrip("/") + tab,
-                          wait_until="domcontentloaded", timeout=60000)
-                page.wait_for_timeout(3000)
-            except Exception as exc:  # noqa: BLE001 — next tab may work
-                print(f"  ! {tab or 'page'}: {exc}")
+            if not _goto_tab(page, page_url.rstrip("/") + tab):
                 continue
             if _looks_logged_out(page):
                 browser.close()
