@@ -101,5 +101,54 @@ class ProcessQueueTest(unittest.TestCase):
         self.assertNotIn("999001", queue_now)
 
 
+class RequeueFailedTest(unittest.TestCase):
+    """A failed URL retried forever must reach MAX_FAILED_ATTEMPTS.
+
+    Regression: requeue_failed used to drop the failed.txt entry when
+    requeuing, so the next failure recorded attempt 1 again and the
+    URL was retried on every run instead of being given up on.
+    """
+
+    def test_attempts_counter_survives_requeue(self):
+        ready_before = state_mod.load_json(state_mod.READY, {})
+        queue_before = QUEUE.read_text() if QUEUE.exists() else ""
+        failed_before = (mon.FAILED.read_text()
+                         if mon.FAILED.exists() else None)
+        cfg = {"settings": {
+                   "caption": {"template": "{caption}", "max_chars": 1024,
+                               "hashtags": []},
+                   "watermark": {}, "editor": {}},
+               "destinations": []}
+        url = "https://www.facebook.com/reel/2152493808690039"
+
+        def always_fail(url, cfg):
+            raise SystemExit("boom")
+
+        orig = mon.process_url
+        mon.process_url = always_fail
+        try:
+            mon.save_failed({url: {"error": "Cannot parse data",
+                                   "attempts": 1}})
+            # cycle 1: requeue keeps the entry, retry fails -> attempt 2
+            self.assertEqual(mon.requeue_failed([]), [url])
+            self.assertEqual(mon.load_failed()[url]["attempts"], 1)
+            mon.process_queue(cfg, [url], 1)
+            self.assertEqual(mon.load_failed()[url]["attempts"], 2)
+            # cycle 2: same again -> attempt 3, then it is given up on
+            self.assertEqual(mon.requeue_failed([]), [url])
+            mon.process_queue(cfg, [url], 1)
+            self.assertEqual(mon.load_failed()[url]["attempts"], 3)
+            self.assertEqual(mon.requeue_failed([]), [])
+        finally:
+            mon.process_url = orig
+            state_mod.save_json(state_mod.READY, ready_before)
+            QUEUE.write_text(queue_before)
+            if failed_before is None:
+                if mon.FAILED.exists():
+                    mon.FAILED.unlink()
+            else:
+                mon.FAILED.write_text(failed_before)
+
+
 if __name__ == "__main__":
     unittest.main()

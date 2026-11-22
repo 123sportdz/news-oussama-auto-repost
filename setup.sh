@@ -40,8 +40,8 @@ if command -v facebook-cli >/dev/null 2>&1 || [ -x /opt/hatch/bin/facebook-cli ]
     echo "  ✅ الصفحات: قائمة الصفحات تتقرا"
   fi
 else
-  echo "  ⚠️  facebook-cli ماشي مثبّت على هاد الجهاز — النشر عبر API غير متاح"
-  echo "     البديل: النشر من المتصفح، أو عيّن توكن كل صفحة في .env"
+  echo "  ⚠️  facebook-cli ماشي مثبّت على هاد الجهاز — نشر البروفايل غير متاح هنا"
+  echo "     نشر الصفحات يخدم عبر Graph API بتوكنات الصفحات (ما يحتاجش facebook-cli)"
   echo "     (الأسهل: لوحة التحكم ← 🔑 توكنات الصفحات — الصق التوكن ويتحفظ وحدو)"
 fi
 echo ""
