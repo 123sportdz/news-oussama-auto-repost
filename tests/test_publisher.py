@@ -107,5 +107,94 @@ class PublishRoutingTest(unittest.TestCase):
         self.assertEqual(calls["page_id"], "147624121772177")
 
 
+class GraphPublishRequestTest(unittest.TestCase):
+    """publish_page_graph builds a correct multipart video upload.
+
+    The Graph route is the one that has never run against Facebook
+    live — so the request it builds must at least be proven correct
+    here: right endpoint, POST, multipart body carrying the token,
+    the description and the file bytes.
+    """
+
+    def setUp(self):
+        self.tmp = Path(__file__).parent / "tmp-graph-publish"
+        self.tmp.mkdir(exist_ok=True)
+        self.video = self.tmp / "clip.mp4"
+        self.video.write_bytes(b"\x00\x00\x00\x18ftypmp42FAKEVIDEO")
+
+    def tearDown(self):
+        for p in self.tmp.iterdir():
+            p.unlink()
+        self.tmp.rmdir()
+
+    def _capture_urlopen(self, body=b'{"id": "987654321"}'):
+        seen = {}
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return body
+
+        def fake_urlopen(req, timeout=None):
+            seen["req"] = req
+            return FakeResp()
+
+        return seen, fake_urlopen
+
+    def test_posts_multipart_video_to_page_videos_endpoint(self):
+        seen, fake = self._capture_urlopen()
+        with mock.patch.object(publisher.urllib.request, "urlopen", fake):
+            result = publisher.publish_page_graph(
+                "147624121772177", "ثنائية مازة و حاج موسى",
+                self.video, "token-news")
+        self.assertEqual(result, {"id": "987654321"})
+        req = seen["req"]
+        self.assertEqual(
+            req.full_url,
+            "https://graph.facebook.com/v21.0/147624121772177/videos")
+        self.assertEqual(req.get_method(), "POST")
+        self.assertIn("multipart/form-data; boundary=",
+                      req.headers["Content-type"])
+        body = req.data
+        self.assertIn(b'name="access_token"\r\n\r\ntoken-news', body)
+        self.assertIn("ثنائية مازة و حاج موسى".encode("utf-8"), body)
+        self.assertIn(b'name="source"; filename="clip.mp4"', body)
+        self.assertIn(b"FAKEVIDEO", body)
+
+    def test_consent_error_becomes_consent_missing_error(self):
+        import io
+        import urllib.error
+
+        err = urllib.error.HTTPError(
+            "https://graph.facebook.com/v21.0/147624121772177/videos",
+            400, "Bad Request", {}, io.BytesIO(
+                b'{"error": {"message": "PROFESSIONAL_CONSENT_REQUIRED"}}'))
+        with mock.patch.object(publisher.urllib.request, "urlopen",
+                               side_effect=err):
+            with self.assertRaises(publisher.ConsentMissingError):
+                publisher.publish_page_graph(
+                    "147624121772177", "cap", self.video, "token-news")
+
+    def test_other_http_error_becomes_publish_error_with_code(self):
+        import io
+        import urllib.error
+
+        err = urllib.error.HTTPError(
+            "https://graph.facebook.com/v21.0/147624121772177/videos",
+            403, "Forbidden", {}, io.BytesIO(
+                b'{"error": {"message": "not allowed"}}'))
+        with mock.patch.object(publisher.urllib.request, "urlopen",
+                               side_effect=err):
+            with self.assertRaises(publisher.PublishError) as ctx:
+                publisher.publish_page_graph(
+                    "147624121772177", "cap", self.video, "token-news")
+        self.assertIn("403", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
