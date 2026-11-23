@@ -74,5 +74,24 @@ class BackupTest(unittest.TestCase):
             backup.restore_state(dest)
 
 
+class GitignoreTest(unittest.TestCase):
+    def test_every_state_file_is_gitignored(self):
+        """Every file the code writes under state/ must be ignored.
+
+        Regression: publish_failed.json (added with the publish
+        give-up cap) was missing from .gitignore, so `git add -A`
+        would have committed live failure records. The 460 MB backup
+        zip in Nov 2026 was the same class of mistake.
+        """
+        root = Path(__file__).resolve().parent.parent
+        ignored = (root / ".gitignore").read_text()
+        for name in ("seen.json", "ready.json", "published.json",
+                     "queue.txt", "last_action.json", "stats.json",
+                     "diagnostics.json", "failed.txt",
+                     "publish_failed.json", "token_status.json",
+                     "last_token_check", "monitor.lock"):
+            self.assertIn(f"state/{name}", ignored, name)
+
+
 if __name__ == "__main__":
     unittest.main()
