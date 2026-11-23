@@ -31,6 +31,14 @@ from src.config import env
 
 CONSENT_ERROR = "PROFESSIONAL_CONSENT_REQUIRED"
 
+# Resumable upload: files over this size go through the
+# start/transfer/finish flow instead of one big POST, so a slow
+# connection can still finish a 70 MB reel — one chunk at a time,
+# each with its own timeout, following the server's offsets.
+RESUMABLE_MIN_SIZE = 25 * 1024 * 1024
+CHUNK_SIZE = 10 * 1024 * 1024
+_BOUNDARY = "----news-oussama-boundary"
+
 BROWSER_INSTRUCTIONS = (
     "Professional Consent is missing for this Page. The Page admin must "
     "approve it inside Facebook first. Until then, publish from the "
@@ -68,41 +76,156 @@ def token_for_destination(destination: dict, fallback: str = "") -> str:
     return fallback or ""
 
 
-def publish_page_graph(page_id: str, text: str, video_path: Path | str,
-                       token: str,
-                       graph_version: str = "v21.0") -> dict:
-    """Publish a video to a Page via the Graph API (video upload).
+def _multipart_body(fields, file_field=None, filename=None,
+                    file_bytes=None, file_content_type="video/mp4"):
+    """One multipart/form-data body. ``fields`` is a list of
+    (name, value) in order; the file part, if any, comes last."""
+    parts = []
+    for name, value in fields:
+        parts.append(
+            f"--{_BOUNDARY}\r\n"
+            f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+            f"{value}\r\n"
+        )
+    head = "".join(parts).encode("utf-8")
+    if file_field is None:
+        return head + f"--{_BOUNDARY}--\r\n".encode()
+    file_head = (
+        f"--{_BOUNDARY}\r\n"
+        f'Content-Disposition: form-data; name="{file_field}"; '
+        f'filename="{filename}"\r\n'
+        f"Content-Type: {file_content_type}\r\n\r\n"
+    ).encode("utf-8")
+    return head + file_head + (file_bytes or b"") + \
+        f"\r\n--{_BOUNDARY}--\r\n".encode()
 
-    Uses only the standard library so no extra dependency is needed.
-    Returns the Graph response (contains the video/post id).
+
+def _post_graph(url, data, headers, timeout):
+    """One POST to graph.facebook.com; returns the parsed JSON.
+
+    Consent problems become ConsentMissingError, anything else
+    becomes PublishError carrying the HTTP status.
     """
-    url = f"https://graph.facebook.com/{graph_version}/{page_id}/videos"
-    boundary = "----news-oussama-boundary"
-    video_path = Path(video_path)
-    body = (
-        f"--{boundary}\r\n"
-        'Content-Disposition: form-data; name="access_token"\r\n\r\n'
-        f"{token}\r\n"
-        f"--{boundary}\r\n"
-        'Content-Disposition: form-data; name="description"\r\n\r\n'
-        f"{text}\r\n"
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="source"; filename="{video_path.name}"\r\n'
-        "Content-Type: video/mp4\r\n\r\n"
-    ).encode("utf-8") + video_path.read_bytes() + f"\r\n--{boundary}--\r\n".encode()
-    req = urllib.request.Request(
-        url, data=body,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-        method="POST",
-    )
+    req = urllib.request.Request(url, data=data, headers=headers,
+                                 method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=300) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         payload = exc.read().decode("utf-8", "replace")
         if CONSENT_ERROR in payload or "professional" in payload.lower():
             raise ConsentMissingError(BROWSER_INSTRUCTIONS) from exc
-        raise PublishError(f"Graph API publish failed ({exc.code}): {payload[:500]}") from exc
+        raise PublishError(
+            f"Graph API publish failed ({exc.code}): {payload[:500]}"
+        ) from exc
+
+
+def _post_graph_form(url, params, timeout):
+    """POST urlencoded fields (start/finish phases)."""
+    data = urllib.parse.urlencode(params).encode("utf-8")
+    return _post_graph(
+        url, data,
+        {"Content-Type": "application/x-www-form-urlencoded"},
+        timeout)
+
+
+def publish_page_graph(page_id: str, text: str, video_path: Path | str,
+                       token: str,
+                       graph_version: str = "v21.0",
+                       resumable_min_size: int = RESUMABLE_MIN_SIZE,
+                       chunk_size: int = CHUNK_SIZE) -> dict:
+    """Publish a video to a Page via the Graph API (video upload).
+
+    Uses only the standard library so no extra dependency is needed.
+    Files over ``resumable_min_size`` go through the resumable
+    start/transfer/finish flow; smaller ones use a single POST.
+    Returns the Graph response (contains the video/post id).
+    """
+    video_path = Path(video_path)
+    if video_path.stat().st_size > resumable_min_size:
+        return publish_page_graph_resumable(
+            page_id, text, video_path, token, graph_version,
+            chunk_size=chunk_size)
+    url = f"https://graph.facebook.com/{graph_version}/{page_id}/videos"
+    body = _multipart_body(
+        [("access_token", token), ("description", text)],
+        file_field="source", filename=video_path.name,
+        file_bytes=video_path.read_bytes())
+    return _post_graph(
+        url, body,
+        {"Content-Type": f"multipart/form-data; boundary={_BOUNDARY}"},
+        timeout=300)
+
+
+def publish_page_graph_resumable(page_id: str, text: str,
+                                 video_path: Path | str, token: str,
+                                 graph_version: str = "v21.0",
+                                 chunk_size: int = CHUNK_SIZE) -> dict:
+    """Publish a large video via the resumable start/transfer/finish
+    flow on /{page-id}/videos.
+
+    The file is read chunk by chunk (never fully into memory). Each
+    transfer follows the offsets the server returns, so a failed
+    chunk is retried once from the same offset instead of restarting
+    the whole upload. Returns the finish-phase response.
+    """
+    video_path = Path(video_path)
+    size = video_path.stat().st_size
+    url = f"https://graph.facebook.com/{graph_version}/{page_id}/videos"
+    start = _post_graph_form(url, {
+        "upload_phase": "start",
+        "file_size": str(size),
+        "access_token": token,
+    }, timeout=60)
+    session_id = start.get("upload_session_id")
+    if not session_id:
+        raise PublishError(
+            "Graph resumable upload: no upload_session_id in start "
+            f"response: {str(start)[:200]}")
+    start_offset = int(start.get("start_offset") or 0)
+    end_offset = int(start.get("end_offset") or size)
+    stalls = 0
+    with open(video_path, "rb") as fh:
+        while start_offset < size:
+            chunk_end = min(end_offset, size, start_offset + chunk_size)
+            fh.seek(start_offset)
+            chunk = fh.read(chunk_end - start_offset)
+            body = _multipart_body(
+                [("upload_phase", "transfer"),
+                 ("upload_session_id", session_id),
+                 ("start_offset", str(start_offset)),
+                 ("access_token", token)],
+                file_field="video_file_chunk", filename=video_path.name,
+                file_bytes=chunk)
+            headers = {"Content-Type":
+                       f"multipart/form-data; boundary={_BOUNDARY}"}
+            try:
+                resp = _post_graph(url, body, headers, timeout=120)
+            except ConsentMissingError:
+                raise
+            except Exception:
+                # One retry of the same chunk; a second failure is real.
+                resp = _post_graph(url, body, headers, timeout=120)
+            new_offset = int(resp.get("start_offset", chunk_end))
+            new_end = int(resp.get("end_offset", size))
+            if new_offset <= start_offset:
+                stalls += 1
+                if stalls >= 3:
+                    raise PublishError(
+                        "Graph resumable upload stalled at byte "
+                        f"{start_offset} of {size}")
+            else:
+                stalls = 0
+            start_offset, end_offset = new_offset, new_end
+    title = text.strip().splitlines()[0][:100] if text.strip() \
+        else "NEWS OUSSAMA"
+    return _post_graph_form(url, {
+        "upload_phase": "finish",
+        "upload_session_id": session_id,
+        "title": title,
+        "description": text,
+        "access_token": token,
+    }, timeout=120)
 
 
 def publish_page_cli(page_id: str, text: str, video_path: Path | str,
