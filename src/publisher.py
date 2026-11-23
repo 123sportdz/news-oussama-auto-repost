@@ -55,6 +55,18 @@ class PublishError(RuntimeError):
     """Raised when a publish attempt fails for another reason."""
 
 
+class AuthPublishError(PublishError):
+    """401/403 from Graph: bad/expired token or missing permission.
+
+    A setup problem, not a bad video — never counts toward the
+    publish give-up cap (see monitor.record_publish_failure)."""
+
+
+class TransientPublishError(PublishError):
+    """5xx or network failure: retry next cycle — never counts toward
+    the publish give-up cap."""
+
+
 def token_for_destination(destination: dict, fallback: str = "") -> str:
     """Access token for one Page destination.
 
@@ -115,9 +127,20 @@ def _post_graph(url, data, headers, timeout):
         payload = exc.read().decode("utf-8", "replace")
         if CONSENT_ERROR in payload or "professional" in payload.lower():
             raise ConsentMissingError(BROWSER_INSTRUCTIONS) from exc
+        if exc.code in (401, 403):
+            raise AuthPublishError(
+                f"Graph API publish failed ({exc.code}): {payload[:500]}"
+            ) from exc
+        if exc.code >= 500:
+            raise TransientPublishError(
+                f"Graph API publish failed ({exc.code}): {payload[:500]}"
+            ) from exc
         raise PublishError(
             f"Graph API publish failed ({exc.code}): {payload[:500]}"
         ) from exc
+    except urllib.error.URLError as exc:
+        raise TransientPublishError(
+            f"Graph API publish failed (network): {exc}") from exc
 
 
 def _post_graph_form(url, params, timeout):
@@ -201,7 +224,7 @@ def publish_page_graph_resumable(page_id: str, text: str,
                        f"multipart/form-data; boundary={_BOUNDARY}"}
             try:
                 resp = _post_graph(url, body, headers, timeout=120)
-            except ConsentMissingError:
+            except (ConsentMissingError, AuthPublishError):
                 raise
             except Exception:
                 # One retry of the same chunk; a second failure is real.
