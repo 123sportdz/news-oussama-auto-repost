@@ -344,5 +344,52 @@ class ResumableUploadTest(unittest.TestCase):
         self.assertEqual(len(server.transfer_bodies), 3)
 
 
+class GraphErrorClassificationTest(unittest.TestCase):
+    """_post_graph sorts failures so the monitor can tell a bad
+    video (count toward give-up) from a bad setup (never counts)."""
+
+    def setUp(self):
+        self.tmp = Path(__file__).parent / "tmp-graph-errors"
+        self.tmp.mkdir(exist_ok=True)
+        self.video = self.tmp / "clip.mp4"
+        self.video.write_bytes(b"\x00\x00\x00\x18ftypmp42FAKEVIDEO")
+
+    def tearDown(self):
+        for p in self.tmp.iterdir():
+            p.unlink()
+        self.tmp.rmdir()
+
+    def _http_error(self, code):
+        import io
+        return urllib.error.HTTPError(
+            "https://graph.facebook.com/v21.0/147624121772177/videos",
+            code, "Error", {}, io.BytesIO(
+                b'{"error": {"message": "boom"}}'))
+
+    def _call(self, side_effect):
+        with mock.patch.object(publisher.urllib.request, "urlopen",
+                               side_effect=side_effect):
+            return publisher.publish_page_graph(
+                "147624121772177", "cap", self.video, "token-news")
+
+    def test_401_and_403_become_auth_errors(self):
+        for code in (401, 403):
+            with self.assertRaises(publisher.AuthPublishError):
+                self._call(self._http_error(code))
+
+    def test_500_becomes_transient_error(self):
+        with self.assertRaises(publisher.TransientPublishError):
+            self._call(self._http_error(500))
+
+    def test_400_stays_a_plain_publish_error(self):
+        with self.assertRaises(publisher.PublishError) as ctx:
+            self._call(self._http_error(400))
+        self.assertIs(type(ctx.exception), publisher.PublishError)
+
+    def test_network_error_becomes_transient_error(self):
+        with self.assertRaises(publisher.TransientPublishError):
+            self._call(urllib.error.URLError("connection reset"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -89,6 +89,48 @@ class DashboardButtonsTest(unittest.TestCase):
         self.assertIn("Consent", msg)
         self.assertFalse(calls["marked"])
 
+    def test_home_page_shows_abandoned_publish_badge(self):
+        from src import monitor as monitor_mod
+        before = monitor_mod.load_publish_failures()
+        monitor_mod.save_publish_failures({
+            FIXTURE_PID: {"NewsDz9": {"attempts": 3,
+                                      "error": "400 bad video",
+                                      "alerted": True,
+                                      "abandoned": True}}})
+        try:
+            page = dashboard.home_page()
+        finally:
+            monitor_mod.save_publish_failures(before)
+        self.assertIn("⛔", page)
+        self.assertIn("متوقف", page)
+
+    def test_manual_publish_clears_abandoned_record(self):
+        from src import monitor as monitor_mod
+        cfg = {"settings": {"caption": {"template": "{caption}",
+                                        "max_chars": 1024, "hashtags": []}},
+               "destinations": [{"name": "NewsDz9", "page_id": "1",
+                                 "enabled": True}]}
+        monitor_mod.save_publish_failures({
+            FIXTURE_PID: {"NewsDz9": {"attempts": 3,
+                                      "error": "400 bad video",
+                                      "alerted": True,
+                                      "abandoned": True}}})
+        orig_is_pub = state_mod.is_published
+        orig_mark = state_mod.mark_published
+        orig_publish = dashboard.publish
+        state_mod.is_published = lambda *a: False
+        state_mod.mark_published = lambda *a: None
+        dashboard.publish = lambda *a, **k: {"id": "v1"}
+        try:
+            ok, _ = dashboard._publish_one(cfg, FIXTURE_PID, "NewsDz9")
+        finally:
+            state_mod.is_published = orig_is_pub
+            state_mod.mark_published = orig_mark
+            dashboard.publish = orig_publish
+            monitor_mod.save_publish_failures({})
+        self.assertTrue(ok)
+        self.assertNotIn(FIXTURE_PID, monitor_mod.load_publish_failures())
+
 
 class DashboardServerTest(unittest.TestCase):
     @classmethod

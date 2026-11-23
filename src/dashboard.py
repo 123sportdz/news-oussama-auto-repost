@@ -44,9 +44,12 @@ from src import state as state_mod  # noqa: E402
 from src.diagnostics import DIAGNOSTICS, run_and_save  # noqa: E402
 from src.discover import discover_all  # noqa: E402
 from src.monitor import (DL, QUEUE, READY, RunLock, _parse_window,  # noqa: E402
-                         in_publish_window, next_window_start, process_queue,
-                         process_url, publish_commands, refresh_ready)
-from src.publisher import (ConsentMissingError, PublishError, publish,  # noqa: E402
+                         clear_publish_failure, in_publish_window,
+                         load_publish_failures, next_window_start,
+                         process_queue, process_url, publish_commands,
+                         record_publish_failure, refresh_ready)
+from src.publisher import (AuthPublishError, ConsentMissingError,  # noqa: E402
+                         PublishError, TransientPublishError, publish,
                          token_for_destination)
 from src.stats import STATS, refresh_stats  # noqa: E402
 
@@ -306,15 +309,27 @@ def _publish_one(cfg: dict, pid: str, dest_name: str,
             return False, "⏳ عملية أخرى شغالة — جرّب بعد قليل"
         if state_mod.is_published(str(pid), dest_name):
             return False, f"المنشور منشور من قبل على {dest_name}"
+        # A manual retry starts fresh: past automatic failures (and
+        # an abandoned flag) do not block an explicit click.
+        clear_publish_failure(str(pid), dest_name)
         try:
             result = publish(dest, text, rec["watermarked"], page_token)
         except ConsentMissingError as exc:
+            record_publish_failure(str(pid), dest_name, exc,
+                                   permanent=False)
             return False, (f"⏸ {dest_name}: موافقة Professional Consent ناقصة — "
                            f"النشر يبقى في الطابور. ({exc})")
+        except (AuthPublishError, TransientPublishError) as exc:
+            record_publish_failure(str(pid), dest_name, exc,
+                                   permanent=False)
+            return False, f"❌ {dest_name}: {exc}"
         except PublishError as exc:
+            record_publish_failure(str(pid), dest_name, exc,
+                                   permanent=True)
             return False, f"❌ {dest_name}: {exc}"
         except (KeyError, FileNotFoundError) as exc:
             return False, f"❌ {dest_name}: {exc}"
+        clear_publish_failure(str(pid), dest_name)
         state_mod.mark_published(str(pid), dest_name, result)
     return True, f"✅ نُشر على {dest_name}: {result}"
 
@@ -860,6 +875,7 @@ def home_page() -> str:
                    if l.strip()] if QUEUE.exists() else [])
 
     ready_cards = []
+    failures = load_publish_failures()
     for pid, rec in ready.items():
         done = (published.get(pid) or {}).get("destinations", {})
         media = ""
@@ -885,6 +901,19 @@ def home_page() -> str:
                     f'<div style="font-size:12px;color:var(--muted)">'
                     f'{esc(p["blocked"])}</div>')
             else:
+                fail = failures.get(pid, {}).get(name) or {}
+                if fail.get("abandoned"):
+                    dest_parts.append(
+                        f'<span class="badge warn">{esc(name)}: ⛔ متوقف '
+                        f'بعد 3 محاولات</span>'
+                        f'<div style="font-size:12px;color:var(--muted)">'
+                        f'{esc(fail.get("error") or "")}</div>')
+                elif fail.get("attempts"):
+                    dest_parts.append(
+                        f'<div style="font-size:12px;color:var(--muted)">'
+                        f'⚠️ فشل النشر إلى {esc(name)}: محاولة '
+                        f'{fail["attempts"]}/3 — '
+                        f'{esc(fail.get("error") or "")}</div>')
                 dest_parts.append(
                     f'<form method="post" action="/publish">'
                     f'<input type="hidden" name="pid" value="{esc(pid)}">'

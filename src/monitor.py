@@ -35,12 +35,73 @@ from src.config import (CONFIG_PATH, enabled_destinations, enabled_sources,  # n
                         env, load_config, validate_config)
 from src.downloader import download_video, post_id_from_url, post_info  # noqa: E402
 from src.editor import watermark_photo, watermark_video  # noqa: E402
-from src.publisher import (ConsentMissingError, PublishError, publish,  # noqa: E402
+from src.publisher import (AuthPublishError, ConsentMissingError,  # noqa: E402
+                         PublishError, TransientPublishError, publish,
                          token_for_destination)
 
 QUEUE = BASE / "state" / "queue.txt"
 READY = BASE / "state" / "ready.json"
+PUBLISH_FAILED = BASE / "state" / "publish_failed.json"
 DL = BASE / "state" / "downloads"
+
+# A (post, destination) that fails with a per-video error this many
+# times is abandoned: it stays ready but is never retried
+# automatically. Auth, network and consent problems never count —
+# the post is fine, the setup is not.
+MAX_PUBLISH_ATTEMPTS = 3
+
+
+def load_publish_failures() -> dict:
+    """publish_failed.json as {post_id: {destination: record}}."""
+    return state_mod.load_json(PUBLISH_FAILED, {})
+
+
+def save_publish_failures(data: dict) -> None:
+    state_mod.save_json(PUBLISH_FAILED, data)
+
+
+def is_publish_abandoned(pid: str, dest_name: str) -> bool:
+    rec = load_publish_failures().get(str(pid), {}).get(dest_name)
+    return bool(rec and rec.get("abandoned"))
+
+
+def record_publish_failure(pid: str, dest_name: str, error,
+                           permanent: bool) -> tuple[int, bool, bool]:
+    """Record one publish failure. Returns (attempts, just_abandoned,
+    first_alert).
+
+    Only permanent (per-video) errors count toward the give-up cap.
+    Every kind of failure is recorded so the first one alerts once
+    and repeats stay silent until the post succeeds or is abandoned.
+    """
+    data = load_publish_failures()
+    per_post = data.setdefault(str(pid), {})
+    rec = per_post.setdefault(dest_name, {"attempts": 0, "error": "",
+                                         "alerted": False,
+                                         "abandoned": False})
+    rec["error"] = str(error)[:200]
+    first_alert = not rec["alerted"]
+    rec["alerted"] = True
+    just_abandoned = False
+    if permanent and not rec["abandoned"]:
+        rec["attempts"] += 1
+        if rec["attempts"] >= MAX_PUBLISH_ATTEMPTS:
+            rec["abandoned"] = True
+            just_abandoned = True
+    save_publish_failures(data)
+    return rec["attempts"], just_abandoned, first_alert
+
+
+def clear_publish_failure(pid: str, dest_name: str) -> None:
+    """Drop the failure record — the post published, or a manual
+    retry starts fresh."""
+    data = load_publish_failures()
+    per_post = data.get(str(pid))
+    if per_post and dest_name in per_post:
+        del per_post[dest_name]
+        if not per_post:
+            del data[str(pid)]
+        save_publish_failures(data)
 
 
 def publish_commands(cfg: dict, record: dict) -> list[dict]:
@@ -490,17 +551,38 @@ def publish_ready(cfg: dict, token: str = "") -> None:
             name = dest["name"]
             if state_mod.is_published(pid, name):
                 continue
+            if is_publish_abandoned(pid, name):
+                print(f"  ⛔ {pid} → {name}: abandoned after "
+                      f"{MAX_PUBLISH_ATTEMPTS} publish attempts")
+                continue
             try:
                 result = publish(dest, text, rec["watermarked"],
                                  token_for_destination(dest, shared))
             except ConsentMissingError as exc:
                 print(f"  ⏸ {name}: {exc}")
-                failed.append(f"{name}: موافقة Professional Consent ناقصة")
+                _, _, first = record_publish_failure(
+                    pid, name, exc, permanent=False)
+                if first:
+                    failed.append(f"{name}: موافقة Professional Consent ناقصة")
+                continue
+            except (AuthPublishError, TransientPublishError) as exc:
+                print(f"  ❌ {name}: {exc}")
+                _, _, first = record_publish_failure(
+                    pid, name, exc, permanent=False)
+                if first:
+                    failed.append(f"{name}: {exc}")
                 continue
             except PublishError as exc:
                 print(f"  ❌ {name}: {exc}")
-                failed.append(f"{name}: {exc}")
+                _, just_abandoned, first = record_publish_failure(
+                    pid, name, exc, permanent=True)
+                if just_abandoned:
+                    failed.append(f"⛔ {name}: توقف بعد "
+                                  f"{MAX_PUBLISH_ATTEMPTS} محاولات — {exc}")
+                elif first:
+                    failed.append(f"{name}: {exc}")
                 continue
+            clear_publish_failure(pid, name)
             state_mod.mark_published(pid, name, result)
             print(f"  ✅ published to {name}: {result}")
             published_count += 1
