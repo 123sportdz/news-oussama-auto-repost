@@ -4,7 +4,11 @@ Page tokens are per Page: a token for NewsDz9 must never be sent
 for aljazaer07, and vice versa. The shared FB_PAGE_ACCESS_TOKEN is
 only a fallback when no per-page token is set.
 """
+import json
+import re
 import unittest
+import urllib.error
+import urllib.parse
 from pathlib import Path
 from unittest import mock
 
@@ -194,6 +198,150 @@ class GraphPublishRequestTest(unittest.TestCase):
                 publisher.publish_page_graph(
                     "147624121772177", "cap", self.video, "token-news")
         self.assertIn("403", str(ctx.exception))
+
+
+class _JsonResp:
+    def __init__(self, payload):
+        self._body = json.dumps(payload).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self._body
+
+
+class _ResumableServer:
+    """Scripted fake for the start/transfer/finish flow."""
+
+    def __init__(self, file_size, fail_first_transfer=False, stall=False):
+        self.file_size = file_size
+        self.fail_first_transfer = fail_first_transfer
+        self.stall = stall
+        self.requests = []
+        self.transfer_bodies = []
+        self._transfer_calls = 0
+
+    def __call__(self, req, timeout=None):
+        self.requests.append(req)
+        data = req.data or b""
+        if b"upload_phase=start" in data:
+            return _JsonResp({"video_id": "v1", "upload_session_id": "s1",
+                              "start_offset": 0,
+                              "end_offset": self.file_size})
+        if b'"upload_phase"\r\n\r\ntransfer' in data:
+            self._transfer_calls += 1
+            self.transfer_bodies.append(data)
+            if self.fail_first_transfer and self._transfer_calls == 1:
+                raise urllib.error.URLError("connection reset")
+            off = int(re.search(rb'start_offset"\r\n\r\n(\d+)',
+                                data).group(1))
+            if self.stall:
+                return _JsonResp({"start_offset": off,
+                                  "end_offset": self.file_size})
+            # Next offset = this offset + the bytes actually sent.
+            head = re.search(
+                rb'video_file_chunk"; filename="[^"]+"\r\n'
+                rb'Content-Type: video/mp4\r\n\r\n', data)
+            chunk = data[head.end():].rsplit(b"\r\n--", 1)[0]
+            nxt = min(off + len(chunk), self.file_size)
+            return _JsonResp({"start_offset": nxt,
+                              "end_offset": self.file_size})
+        if b"upload_phase=finish" in data:
+            return _JsonResp({"video_id": "v1", "success": True})
+        raise AssertionError(f"unexpected request: {data[:80]!r}")
+
+
+class ResumableUploadTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(__file__).parent / "tmp-resumable-publish"
+        self.tmp.mkdir(exist_ok=True)
+        # 25 distinct bytes, so each chunk's content is checkable.
+        self.video = self.tmp / "clip.mp4"
+        self.video.write_bytes(bytes(range(25)))
+
+    def tearDown(self):
+        for p in self.tmp.iterdir():
+            p.unlink()
+        self.tmp.rmdir()
+
+    def test_large_file_goes_through_start_transfer_finish(self):
+        server = _ResumableServer(file_size=25)
+        with mock.patch.object(publisher.urllib.request, "urlopen", server):
+            result = publisher.publish_page_graph_resumable(
+                "147624121772177", "ثنائية مازة\nسطر ثاني",
+                self.video, "token-news", chunk_size=10)
+        self.assertEqual(result, {"video_id": "v1", "success": True})
+        kinds = []
+        for req in server.requests:
+            data = req.data or b""
+            if b"upload_phase=start" in data:
+                kinds.append("start")
+                params = urllib.parse.parse_qs(data.decode())
+                self.assertEqual(params["file_size"], ["25"])
+                self.assertEqual(params["access_token"], ["token-news"])
+            elif b'"upload_phase"\r\n\r\ntransfer' in data:
+                kinds.append("transfer")
+            elif b"upload_phase=finish" in data:
+                kinds.append("finish")
+                params = urllib.parse.parse_qs(data.decode())
+                self.assertEqual(params["title"], ["ثنائية مازة"])
+                self.assertEqual(params["description"],
+                                 ["ثنائية مازة\nسطر ثاني"])
+        self.assertEqual(kinds, ["start", "transfer", "transfer",
+                                 "transfer", "finish"])
+        # Chunks carry exactly the file's bytes, in order.
+        self.assertIn(bytes(range(0, 10)), server.transfer_bodies[0])
+        self.assertIn(bytes(range(10, 20)), server.transfer_bodies[1])
+        self.assertIn(bytes(range(20, 25)), server.transfer_bodies[2])
+
+    def test_dispatcher_picks_resumable_above_threshold(self):
+        server = _ResumableServer(file_size=25)
+        with mock.patch.object(publisher.urllib.request, "urlopen", server):
+            publisher.publish_page_graph(
+                "147624121772177", "cap", self.video, "token-news",
+                resumable_min_size=10, chunk_size=10)
+        kinds = [b"upload_phase=start" in (r.data or b"")
+                 for r in server.requests]
+        self.assertTrue(kinds[0])
+        self.assertEqual(len(server.requests), 5)
+
+    def test_transfer_failure_retries_the_same_chunk_once(self):
+        server = _ResumableServer(file_size=25, fail_first_transfer=True)
+        with mock.patch.object(publisher.urllib.request, "urlopen", server):
+            result = publisher.publish_page_graph_resumable(
+                "147624121772177", "cap", self.video, "token-news",
+                chunk_size=10)
+        self.assertEqual(result, {"video_id": "v1", "success": True})
+        # 1 failed + 3 successful transfers, then finish.
+        self.assertEqual(len(server.transfer_bodies), 4)
+        self.assertEqual(len(server.requests), 6)
+
+    def test_start_failure_raises_without_any_transfer(self):
+        import io
+
+        err = urllib.error.HTTPError(
+            "https://graph.facebook.com/v21.0/147624121772177/videos",
+            400, "Bad Request", {}, io.BytesIO(
+                b'{"error": {"message": "bad file_size"}}'))
+        with mock.patch.object(publisher.urllib.request, "urlopen",
+                               side_effect=err):
+            with self.assertRaises(publisher.PublishError):
+                publisher.publish_page_graph_resumable(
+                    "147624121772177", "cap", self.video, "token-news")
+
+    def test_stalled_upload_raises_after_three_stalls(self):
+        server = _ResumableServer(file_size=25, stall=True)
+        with mock.patch.object(publisher.urllib.request, "urlopen", server):
+            with self.assertRaises(publisher.PublishError) as ctx:
+                publisher.publish_page_graph_resumable(
+                    "147624121772177", "cap", self.video, "token-news",
+                    chunk_size=10)
+        self.assertIn("stalled", str(ctx.exception))
+        self.assertEqual(len(server.transfer_bodies), 3)
 
 
 if __name__ == "__main__":
